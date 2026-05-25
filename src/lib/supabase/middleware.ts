@@ -45,7 +45,9 @@ export async function updateSession(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
   // Redirect authenticated users away from auth pages
-  if (user && authPaths.some((p) => pathname.startsWith(p))) {
+  // Skip redirect for Next.js server action POST requests (they have Next-Action header)
+  const isServerAction = request.headers.has("next-action");
+  if (user && !isServerAction && authPaths.some((p) => pathname.startsWith(p))) {
     const url = request.nextUrl.clone();
     url.pathname = "/dashboard";
     return NextResponse.redirect(url);
