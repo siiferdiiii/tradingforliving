@@ -41,6 +41,12 @@ export async function getSessionsByUser(filters?: SessionFilters) {
     include: {
       method: { select: { id: true, name: true } },
       strategy: { select: { id: true, name: true } },
+      trades: {
+        select: {
+          result: true,
+          actualR: true,
+        },
+      },
       _count: { select: { trades: true } },
     },
     orderBy: { createdAt: "desc" },
@@ -53,6 +59,11 @@ export async function getSessionsByUser(filters?: SessionFilters) {
 export async function getSessionById(id: string) {
   const user = await getSession();
   if (!user) return null;
+
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (!uuidRegex.test(id)) {
+    return null;
+  }
 
   const session = await prisma.backtestSession.findFirst({
     where: { id, userId: user.id },
@@ -133,6 +144,11 @@ export async function updateSession(
     const user = await getSession();
     if (!user) return { error: "Anda harus login untuk melakukan ini" };
 
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(id)) {
+      return { error: "ID tidak valid" };
+    }
+
     const existing = await prisma.backtestSession.findFirst({
       where: { id, userId: user.id },
     });
@@ -164,6 +180,11 @@ export async function deleteSession(id: string): Promise<ActionResult> {
   try {
     const user = await getSession();
     if (!user) return { error: "Anda harus login untuk melakukan ini" };
+
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(id)) {
+      return { error: "ID tidak valid" };
+    }
 
     const existing = await prisma.backtestSession.findFirst({
       where: { id, userId: user.id },

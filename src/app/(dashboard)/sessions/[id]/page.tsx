@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, use } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { 
   ArrowLeft, 
   Plus, 
@@ -15,125 +15,62 @@ import {
   Check, 
   FileText,
   Clock,
-  Compass,
-  AlertTriangle,
   Smile,
   Image as ImageIcon
 } from "lucide-react";
-import { DatabaseManager } from "@/lib/mock-data";
-import { TradingSession, Trade, Method, Strategy } from "@/types";
+import { getSessionById, deleteSession } from "@/lib/actions/session";
+import { deleteTrade } from "@/lib/actions/trade";
 
-export default function SessionDetailPage() {
-  const pathname = usePathname();
+type SessionWithRelations = Awaited<ReturnType<typeof getSessionById>>;
+
+export default function SessionDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id: sessionId } = use(params);
   const router = useRouter();
-  const [session, setSession] = useState<TradingSession | null>(null);
-  const [trades, setTrades] = useState<Trade[]>([]);
-  const [method, setMethod] = useState<Method | null>(null);
-  const [strategy, setStrategy] = useState<Strategy | null>(null);
-  
-  const [isClient, setIsClient] = useState(false);
+  const [session, setSession] = useState<SessionWithRelations>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [expandedTradeId, setExpandedTradeId] = useState<string | null>(null);
-  const [isGridView, setIsGridView] = useState(false);
+  const [isClient, setIsClient] = useState(false);
 
   useEffect(() => {
     setIsClient(true);
-    const segments = pathname.split("/");
-    const sessionId = segments[segments.length - 1];
-
-    if (sessionId) {
-      const allSessions = DatabaseManager.getSessions();
-      const foundSession = allSessions.find(s => s.id === sessionId);
-      if (foundSession) {
-        setSession(foundSession);
-
-        // Load associated trades
-        const allTrades = DatabaseManager.getTrades();
-        const assocTrades = allTrades.filter(t => t.sessionId === sessionId);
-        setTrades(assocTrades);
-
-        // Load method & strategy details if available
-        if (assocTrades.length > 0) {
-          const mId = assocTrades[0].methodId;
-          const sId = assocTrades[0].strategyId;
-          
-          const foundMethod = DatabaseManager.getMethods().find(m => m.id === mId);
-          if (foundMethod) setMethod(foundMethod);
-          
-          const foundStrat = DatabaseManager.getStrategies().find(s => s.id === sId);
-          if (foundStrat) setStrategy(foundStrat);
-        }
+    async function load() {
+      setIsLoading(true);
+      try {
+        const data = await getSessionById(sessionId);
+        setSession(data);
+      } catch (err) {
+        console.error("Gagal memuat sesi:", err);
+      } finally {
+        setIsLoading(false);
       }
     }
-  }, [pathname]);
+    load();
+  }, [sessionId]);
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!session) return;
     if (confirm("Apakah Anda yakin ingin menghapus sesi backtest ini beserta seluruh tradenya?")) {
-      const allSessions = DatabaseManager.getSessions();
-      const updated = allSessions.filter(s => s.id !== session.id);
-      DatabaseManager.saveSessions(updated);
-
-      // Clean up trades in session
-      const allTrades = DatabaseManager.getTrades();
-      const filteredTrades = allTrades.filter(t => t.sessionId !== session.id);
-      DatabaseManager.saveTrades(filteredTrades);
-
-      router.push("/sessions");
+      const res = await deleteSession(session.id);
+      if (res?.error) {
+        alert(typeof res.error === "string" ? res.error : "Gagal menghapus sesi");
+      } else {
+        router.push("/sessions");
+      }
     }
   };
 
-  const handleComplete = () => {
-    if (!session) return;
-    if (confirm("Tandai sesi backtest ini sebagai Selesai?")) {
-      const allSessions = DatabaseManager.getSessions();
-      const updated = allSessions.map(s => {
-        if (s.id === session.id) {
-          return { ...s, status: "completed" as const };
-        }
-        return s;
-      });
-      DatabaseManager.saveSessions(updated);
-      setSession({ ...session, status: "completed" });
-    }
-  };
-
-  const handleTradeDelete = (tradeId: string, e: React.MouseEvent) => {
+  const handleTradeDelete = async (tradeId: string, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     if (confirm("Hapus catatan trade ini?")) {
-      const allTrades = DatabaseManager.getTrades();
-      const updatedTrades = allTrades.filter(t => t.id !== tradeId);
-      DatabaseManager.saveTrades(updatedTrades);
-      
-      const assoc = updatedTrades.filter(t => t.sessionId === session!.id);
-      setTrades(assoc);
-
-      // Recalculate session stats
-      const wins = assoc.filter(t => t.result === "win");
-      const wr = assoc.length > 0 ? (wins.length / assoc.length) * 100 : 0;
-      const profit = assoc.reduce((sum, t) => sum + t.pnl, 0);
-
-      const allSessions = DatabaseManager.getSessions();
-      const updatedSessions = allSessions.map(s => {
-        if (s.id === session!.id) {
-          return { 
-            ...s, 
-            totalTrades: assoc.length, 
-            winRate: parseFloat(wr.toFixed(1)),
-            netProfit: profit,
-            endBalance: s.startBalance + profit
-          };
-        }
-        return s;
-      });
-      DatabaseManager.saveSessions(updatedSessions);
-      setSession({
-        ...session!,
-        totalTrades: assoc.length,
-        winRate: parseFloat(wr.toFixed(1)),
-        netProfit: profit,
-        endBalance: session!.startBalance + profit
-      });
+      const res = await deleteTrade(tradeId);
+      if (res?.error) {
+        alert(typeof res.error === "string" ? res.error : "Gagal menghapus trade");
+      } else {
+        // Reload session data
+        const data = await getSessionById(sessionId);
+        setSession(data);
+      }
     }
   };
 
@@ -145,7 +82,7 @@ export default function SessionDetailPage() {
     }
   };
 
-  if (!isClient) {
+  if (!isClient || isLoading) {
     return (
       <div className="flex h-[60vh] items-center justify-center">
         <div className="w-8 h-8 border-4 border-primary/30 border-t-primary rounded-full animate-spin" />
@@ -165,16 +102,17 @@ export default function SessionDetailPage() {
   }
 
   // Stats calculation
+  const trades = session.trades || [];
   const totalTrades = trades.length;
-  const wins = trades.filter(t => t.result === "win");
+  const wins = trades.filter(t => t.result === "WIN");
   const winRate = totalTrades > 0 ? ((wins.length / totalTrades) * 100).toFixed(1) : "0.0";
-  const avgR = totalTrades > 0 ? (trades.reduce((sum, t) => sum + t.rr, 0) / totalTrades).toFixed(2) : "0.00";
+  const avgR = totalTrades > 0 ? (trades.reduce((sum, t) => sum + Number(t.actualR || 0), 0) / totalTrades).toFixed(2) : "0.00";
   
   // Find best trade (highest R value)
   let bestTradeR = 0;
   trades.forEach(t => {
-    if (t.result === "win" && t.rr > bestTradeR) {
-      bestTradeR = t.rr;
+    if (t.result === "WIN" && Number(t.actualR || 0) > bestTradeR) {
+      bestTradeR = Number(t.actualR || 0);
     }
   });
 
@@ -193,44 +131,30 @@ export default function SessionDetailPage() {
       <div className="glass rounded-2xl border border-white/5 p-6 flex flex-col md:flex-row md:items-center justify-between gap-6 relative overflow-hidden">
         <div className="space-y-3 flex-grow">
           <div className="flex flex-wrap items-center gap-2.5">
-            <span className={`inline-flex items-center gap-1.5 text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
-              session.status === "active" 
-                ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" 
-                : "bg-zinc-800/40 text-zinc-400 border border-zinc-700/30"
-            }`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${session.status === "active" ? "bg-emerald-400 animate-pulse" : "bg-zinc-500"}`} />
-              {session.status === "active" ? "Sesi Aktif" : "Sesi Selesai"}
+            <span className="inline-flex items-center gap-1.5 text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              Sesi Aktif
             </span>
 
-            {method && strategy && (
+            {session.method && session.strategy && (
               <span className="text-[10px] text-indigo-400 font-semibold uppercase tracking-wider">
-                {method.name} &rarr; {strategy.name}
+                {session.method.name} &rarr; {session.strategy.name}
               </span>
             )}
           </div>
 
           <h1 className="text-3xl font-extrabold tracking-tight text-white">{session.name}</h1>
           <div className="flex flex-wrap items-center gap-4 text-xs text-zinc-400 font-medium">
-            <span className="font-bold text-zinc-200">Pair: {session.notes.split(" ")[2] || "Forex"}</span>
+            <span className="font-bold text-zinc-200">Pair: {session.instrument}</span>
             <span className="text-zinc-500">|</span>
             <span className="flex items-center gap-1">
               <Calendar className="w-3.5 h-3.5" />
-              Periode: {new Date(session.date).toLocaleDateString("id-ID", { month: "long", year: "numeric" })}
+              Periode: {new Date(session.periodStart).toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })} - {new Date(session.periodEnd).toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })}
             </span>
           </div>
         </div>
 
         <div className="flex gap-2.5 self-start md:self-center">
-          {session.status === "active" && (
-            <button
-              onClick={handleComplete}
-              className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-emerald-500/20 hover:border-emerald-500/40 bg-emerald-500/5 hover:bg-emerald-500/10 text-emerald-400 text-xs font-bold transition-all"
-            >
-              <Check className="w-4 h-4" />
-              Selesaikan Sesi
-            </button>
-          )}
-
           <button
             onClick={handleDelete}
             className="flex items-center justify-center p-3 rounded-xl border border-white/5 hover:border-red-500/20 bg-white/5 hover:bg-red-500/10 text-zinc-400 hover:text-red-400 transition-all"
@@ -292,15 +216,13 @@ export default function SessionDetailPage() {
             <p className="text-xs text-zinc-500">Log trade di sesi backtesting ini.</p>
           </div>
 
-          {session.status === "active" && (
-            <Link
-              href={`/sessions/${session.id}/trades/new`}
-              className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-gradient-to-r from-primary to-accent-violet hover:from-primary-hover hover:to-primary text-white text-xs font-semibold shadow-lg shadow-primary/10 transition-all hover:scale-[1.02]"
-            >
-              <Plus className="w-4 h-4" />
-              Catat Trade Baru
-            </Link>
-          )}
+          <Link
+            href={`/sessions/${session.id}/trades/new`}
+            className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-gradient-to-r from-primary to-accent-violet hover:from-primary-hover hover:to-primary text-white text-xs font-semibold shadow-lg shadow-primary/10 transition-all hover:scale-[1.02]"
+          >
+            <Plus className="w-4 h-4" />
+            Catat Trade Baru
+          </Link>
         </div>
 
         {trades.length > 0 ? (
@@ -321,6 +243,8 @@ export default function SessionDetailPage() {
                 <tbody className="divide-y divide-zinc-900/60">
                   {trades.map((trade) => {
                     const isExpanded = expandedTradeId === trade.id;
+                    const screenshotUrl = trade.images?.[0]?.storageUrl;
+
                     return (
                       <React.Fragment key={trade.id}>
                         <tr 
@@ -330,22 +254,22 @@ export default function SessionDetailPage() {
                           <td className="px-6 py-4 flex items-center gap-2">
                             {isExpanded ? <ChevronUp className="w-4 h-4 text-zinc-500" /> : <ChevronDown className="w-4 h-4 text-zinc-500" />}
                             <span className="font-mono text-xs text-zinc-400 bg-zinc-900 border border-zinc-800 px-2 py-0.5 rounded">
-                              {trade.pair} ({trade.notes?.split(" ").includes("London") ? "LONDON" : "NY"})
+                              {session.instrument} ({trade.session})
                             </span>
                           </td>
-                          <td className="px-6 py-4 font-mono">{trade.entryPrice.toFixed(5)}</td>
-                          <td className="px-6 py-4 font-mono text-red-500">{trade.stopLoss?.toFixed(5) || "-"}</td>
-                          <td className="px-6 py-4 font-mono text-emerald-500">{trade.takeProfit?.toFixed(5) || "-"}</td>
-                          <td className="px-6 py-4 font-mono">{trade.rr.toFixed(2)} R</td>
+                          <td className="px-6 py-4 font-mono">{Number(trade.entryPrice).toFixed(5)}</td>
+                          <td className="px-6 py-4 font-mono text-red-500">{Number(trade.slPrice).toFixed(5)}</td>
+                          <td className="px-6 py-4 font-mono text-emerald-500">{Number(trade.tpPrice).toFixed(5)}</td>
+                          <td className="px-6 py-4 font-mono">{Number(trade.rrTarget).toFixed(2)} R</td>
                           <td className="px-6 py-4">
                             <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
-                              trade.result === 'win' 
+                              trade.result === 'WIN' 
                                 ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" 
-                                : trade.result === 'loss' 
+                                : trade.result === 'LOSS' 
                                 ? "bg-red-500/10 text-red-400 border border-red-500/20" 
                                 : "bg-zinc-800/40 text-zinc-400 border border-zinc-700/30"
                             }`}>
-                              {trade.result.toUpperCase()}
+                              {trade.result}
                             </span>
                           </td>
                           <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
@@ -374,8 +298,8 @@ export default function SessionDetailPage() {
                                   <div className="flex gap-6">
                                     <div className="space-y-1">
                                       <span className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block">Hasil Finansial</span>
-                                      <span className={`text-base font-bold font-mono ${trade.pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                                        {trade.pnl >= 0 ? "+" : ""}${trade.pnl} ({(trade.pnl / 100).toFixed(2)}% dari modal)
+                                      <span className={`text-base font-bold font-mono ${Number(trade.actualR) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                                        {Number(trade.actualR) >= 0 ? "+" : ""}{Number(trade.actualR).toFixed(2)} R
                                       </span>
                                     </div>
 
@@ -383,7 +307,7 @@ export default function SessionDetailPage() {
                                       <span className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block">Kondisi Psikologis</span>
                                       <span className="text-xs font-semibold bg-zinc-900 border border-zinc-800 px-3 py-1 rounded-xl flex items-center gap-1">
                                         <Smile className="w-3.5 h-3.5 text-indigo-400" />
-                                        Disiplin
+                                        {trade.mood || "DISCIPLINED"}
                                       </span>
                                     </div>
                                   </div>
@@ -394,10 +318,10 @@ export default function SessionDetailPage() {
                                     <ImageIcon className="w-3.5 h-3.5" />
                                     Screenshot Grafik Pendukung
                                   </span>
-                                  {trade.entryImage ? (
+                                  {screenshotUrl ? (
                                     <div className="relative rounded-xl overflow-hidden border border-white/5 group h-40">
                                       <img
-                                        src={trade.entryImage}
+                                        src={screenshotUrl}
                                         alt="Screenshot Entry"
                                         className="w-full h-full object-cover transition-transform group-hover:scale-105 duration-300"
                                       />
@@ -428,14 +352,12 @@ export default function SessionDetailPage() {
             <FileText className="w-12 h-12 text-zinc-700 mb-3" />
             <h4 className="text-zinc-300 font-bold">Belum ada trade dicatat</h4>
             <p className="text-xs text-zinc-500 mt-1 max-w-[280px]">Mulai lakukan pengujian dengan mencatat trade pertama di sesi backtest ini.</p>
-            {session.status === "active" && (
-              <Link
-                href={`/sessions/${session.id}/trades/new`}
-                className="mt-4 flex items-center gap-2 px-4 py-2 rounded-xl bg-primary text-white text-xs font-semibold transition-all hover:bg-primary-hover"
-              >
-                Catat Trade Pertama
-              </Link>
-            )}
+            <Link
+              href={`/sessions/${session.id}/trades/new`}
+              className="mt-4 flex items-center gap-2 px-4 py-2 rounded-xl bg-primary text-white text-xs font-semibold transition-all hover:bg-primary-hover"
+            >
+              Catat Trade Pertama
+            </Link>
           </div>
         )}
       </div>

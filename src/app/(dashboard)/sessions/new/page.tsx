@@ -4,14 +4,17 @@ import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Check, FolderPlus, Sparkles } from "lucide-react";
-import { DatabaseManager } from "@/lib/mock-data";
-import { Method, Strategy, TradingSession } from "@/types";
+import { getMethodsByUser } from "@/lib/actions/method";
+import { getStrategiesByMethod } from "@/lib/actions/strategy";
+import { createSession } from "@/lib/actions/session";
+
+type DBMethod = Awaited<ReturnType<typeof getMethodsByUser>>[number];
+type DBStrategy = Awaited<ReturnType<typeof getStrategiesByMethod>>[number];
 
 export default function NewSessionPage() {
   const router = useRouter();
-  const [methods, setMethods] = useState<Method[]>([]);
-  const [strategies, setStrategies] = useState<Strategy[]>([]);
-  const [filteredStrats, setFilteredStrats] = useState<Strategy[]>([]);
+  const [methods, setMethods] = useState<DBMethod[]>([]);
+  const [filteredStrats, setFilteredStrats] = useState<DBStrategy[]>([]);
   
   const [name, setName] = useState("");
   const [selectedMethodId, setSelectedMethodId] = useState("");
@@ -24,32 +27,47 @@ export default function NewSessionPage() {
   const [error, setError] = useState("");
   const [isClient, setIsClient] = useState(false);
 
+  // Load methods on mount
   useEffect(() => {
     setIsClient(true);
-    const loadedMethods = DatabaseManager.getMethods();
-    const loadedStrats = DatabaseManager.getStrategies();
-    setMethods(loadedMethods);
-    setStrategies(loadedStrats);
-
-    if (loadedMethods.length > 0) {
-      setSelectedMethodId(loadedMethods[0].id);
-    }
-  }, []);
-
-  // Handle cascading dropdown update
-  useEffect(() => {
-    if (selectedMethodId) {
-      const filtered = strategies.filter(s => s.methodId === selectedMethodId);
-      setFilteredStrats(filtered);
-      if (filtered.length > 0) {
-        setSelectedStrategyId(filtered[0].id);
-      } else {
-        setSelectedStrategyId("");
+    async function loadMethods() {
+      try {
+        const data = await getMethodsByUser();
+        setMethods(data);
+        if (data.length > 0) {
+          setSelectedMethodId(data[0].id);
+        }
+      } catch (err) {
+        console.error("Gagal memuat metode:", err);
       }
     }
-  }, [selectedMethodId, strategies]);
+    loadMethods();
+  }, []);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // Load strategies when selectedMethodId changes
+  useEffect(() => {
+    async function loadStrategies() {
+      if (!selectedMethodId) {
+        setFilteredStrats([]);
+        setSelectedStrategyId("");
+        return;
+      }
+      try {
+        const data = await getStrategiesByMethod(selectedMethodId);
+        setFilteredStrats(data);
+        if (data.length > 0) {
+          setSelectedStrategyId(data[0].id);
+        } else {
+          setSelectedStrategyId("");
+        }
+      } catch (err) {
+        console.error("Gagal memuat strategi:", err);
+      }
+    }
+    loadStrategies();
+  }, [selectedMethodId]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
 
@@ -72,25 +90,27 @@ export default function NewSessionPage() {
 
     setIsLoading(true);
 
-    const newSession: TradingSession = {
-      id: `sess-${Date.now()}`,
-      name,
-      date: startDate,
-      status: "active",
-      startBalance: 10000,
-      endBalance: 10000,
-      totalTrades: 0,
-      winRate: 0,
-      netProfit: 0,
-      notes: `Sesi backtest ${instrument} menggunakan ${methods.find(m => m.id === selectedMethodId)?.name}.`,
-      createdAt: new Date().toISOString()
-    };
+    try {
+      const res = await createSession({
+        name,
+        methodId: selectedMethodId,
+        strategyId: selectedStrategyId,
+        instrument,
+        periodStart: new Date(startDate),
+        periodEnd: new Date(endDate),
+      });
 
-    setTimeout(() => {
-      const currentSessions = DatabaseManager.getSessions();
-      DatabaseManager.saveSessions([newSession, ...currentSessions]);
-      router.push(`/sessions/${newSession.id}`);
-    }, 800);
+      if (res.error) {
+        setError(typeof res.error === "string" ? res.error : "Gagal membuat sesi backtest.");
+      } else if (res.data) {
+        router.push(`/sessions/${res.data.id}`);
+      }
+    } catch (err) {
+      console.error(err);
+      setError("Terjadi kesalahan server. Silakan coba lagi.");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   if (!isClient) {
