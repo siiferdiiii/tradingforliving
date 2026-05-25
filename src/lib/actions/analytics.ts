@@ -9,6 +9,17 @@ export type DashboardStats = {
   avgR: number;
   profitFactor: number;
   bestStrategy: { name: string; winRate: number } | null;
+  maxWinStreak: number;
+  maxLossStreak: number;
+};
+
+export type ConceptTimeframeStat = {
+  conceptName: string;
+  timeframe: string;
+  totalTrades: number;
+  winCount: number;
+  winRate: number;
+  avgR: number;
 };
 
 export type EquityPoint = {
@@ -82,7 +93,15 @@ export async function getDashboardStats(
 ): Promise<DashboardStats> {
   const user = await getSession();
   if (!user) {
-    return { totalTrades: 0, winRate: 0, avgR: 0, profitFactor: 0, bestStrategy: null };
+    return { 
+      totalTrades: 0, 
+      winRate: 0, 
+      avgR: 0, 
+      profitFactor: 0, 
+      bestStrategy: null,
+      maxWinStreak: 0,
+      maxLossStreak: 0
+    };
   }
 
   const where = buildTradeWhereClause(user.id, filters);
@@ -94,7 +113,15 @@ export async function getDashboardStats(
 
   const totalTrades = trades.length;
   if (totalTrades === 0) {
-    return { totalTrades: 0, winRate: 0, avgR: 0, profitFactor: 0, bestStrategy: null };
+    return { 
+      totalTrades: 0, 
+      winRate: 0, 
+      avgR: 0, 
+      profitFactor: 0, 
+      bestStrategy: null,
+      maxWinStreak: 0,
+      maxLossStreak: 0
+    };
   }
 
   const wins = trades.filter((t) => t.result === "WIN" || t.result === "PARTIAL").length;
@@ -112,6 +139,37 @@ export async function getDashboardStats(
       .reduce((sum, t) => sum + Number(t.actualR), 0)
   );
   const profitFactor = negativeR === 0 ? positiveR : Math.round((positiveR / negativeR) * 100) / 100;
+
+  // Calculate streaks in chronological order
+  const chronologicalTrades = await prisma.trade.findMany({
+    where,
+    select: { result: true },
+    orderBy: [
+      { tradeDate: "asc" },
+      { createdAt: "asc" }
+    ],
+  });
+
+  let maxWinStreak = 0;
+  let currentWinStreak = 0;
+  let maxLossStreak = 0;
+  let currentLossStreak = 0;
+
+  for (const t of chronologicalTrades) {
+    if (t.result === "WIN" || t.result === "PARTIAL") {
+      currentWinStreak++;
+      if (currentWinStreak > maxWinStreak) maxWinStreak = currentWinStreak;
+      currentLossStreak = 0;
+    } else if (t.result === "LOSS") {
+      currentLossStreak++;
+      if (currentLossStreak > maxLossStreak) maxLossStreak = currentLossStreak;
+      currentWinStreak = 0;
+    } else {
+      // BREAKEVEN resets both streaks
+      currentWinStreak = 0;
+      currentLossStreak = 0;
+    }
+  }
 
   // Best strategy by win rate (min 5 trades)
   const strategies = await prisma.strategy.findMany({
@@ -149,7 +207,15 @@ export async function getDashboardStats(
     }
   }
 
-  return { totalTrades, winRate, avgR, profitFactor, bestStrategy };
+  return { 
+    totalTrades, 
+    winRate, 
+    avgR, 
+    profitFactor, 
+    bestStrategy,
+    maxWinStreak,
+    maxLossStreak
+  };
 }
 
 /**
@@ -355,4 +421,62 @@ export async function getRDistribution(
   });
 
   return trades.map((t) => Number(t.actualR));
+}
+
+/**
+ * Concept-timeframe breakdown: win rate and stats per concept on each timeframe
+ */
+export async function getConceptTimeframeBreakdown(
+  filters?: AnalyticsFilters
+): Promise<ConceptTimeframeStat[]> {
+  const user = await getSession();
+  if (!user) return [];
+
+  const tradeConcepts = await prisma.tradeConcept.findMany({
+    where: {
+      isPresent: true,
+      trade: buildTradeWhereClause(user.id, filters),
+    },
+    select: {
+      strategyConcept: { select: { name: true } },
+      trade: {
+        select: {
+          timeframeTrigger: true,
+          result: true,
+          actualR: true,
+        },
+      },
+    },
+  });
+
+  const map = new Map<string, { wins: number; total: number; totalR: number }>();
+
+  for (const tc of tradeConcepts) {
+    const conceptName = tc.strategyConcept.name;
+    const tf = tc.trade.timeframeTrigger;
+    const key = `${conceptName}||${tf}`;
+
+    if (!map.has(key)) {
+      map.set(key, { wins: 0, total: 0, totalR: 0 });
+    }
+
+    const stats = map.get(key)!;
+    stats.total++;
+    stats.totalR += Number(tc.trade.actualR);
+    if (tc.trade.result === "WIN" || tc.trade.result === "PARTIAL") {
+      stats.wins++;
+    }
+  }
+
+  return Array.from(map.entries()).map(([key, stats]) => {
+    const [conceptName, timeframe] = key.split("||");
+    return {
+      conceptName,
+      timeframe,
+      totalTrades: stats.total,
+      winCount: stats.wins,
+      winRate: Math.round((stats.wins / stats.total) * 1000) / 10,
+      avgR: Math.round((stats.totalR / stats.total) * 100) / 100,
+    };
+  });
 }
