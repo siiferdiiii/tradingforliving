@@ -23,6 +23,11 @@ export async function getMethodsByUser() {
     where: { userId: user.id },
     include: {
       timeframes: true,
+      backtestSessions: {
+        include: {
+          trades: true,
+        },
+      },
       _count: { select: { strategies: true, backtestSessions: true } },
     },
     orderBy: { createdAt: "desc" },
@@ -44,9 +49,19 @@ export async function getMethodById(id: string) {
         include: {
           concepts: true,
           sessions: true,
+          backtestSessions: {
+            include: {
+              trades: true,
+            },
+          },
           _count: { select: { backtestSessions: true } },
         },
         orderBy: { createdAt: "desc" },
+      },
+      backtestSessions: {
+        include: {
+          trades: true,
+        },
       },
       _count: { select: { backtestSessions: true } },
     },

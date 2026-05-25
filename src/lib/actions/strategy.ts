@@ -52,6 +52,11 @@ export async function getStrategyById(id: string) {
       concepts: true,
       sessions: true,
       method: { select: { id: true, name: true } },
+      backtestSessions: {
+        include: {
+          trades: true,
+        },
+      },
       _count: { select: { backtestSessions: true } },
     },
   });

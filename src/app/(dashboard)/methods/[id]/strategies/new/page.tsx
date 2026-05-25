@@ -1,40 +1,43 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, use } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { ArrowLeft, Check, Plus, Trash2, Shield, Target, FileText } from "lucide-react";
-import { DatabaseManager } from "@/lib/mock-data";
-import { Strategy, Method } from "@/types";
+import { useRouter } from "next/navigation";
+import { ArrowLeft, Check, Plus, Shield, Target, Clock } from "lucide-react";
+import { getMethodById } from "@/lib/actions/method";
+import { createStrategy } from "@/lib/actions/strategy";
 
-export default function NewStrategyPage() {
-  const pathname = usePathname();
+type DBMethod = Awaited<ReturnType<typeof getMethodById>>;
+
+export default function NewStrategyPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id: methodId } = use(params);
   const router = useRouter();
-  const [method, setMethod] = useState<Method | null>(null);
+  const [method, setMethod] = useState<DBMethod>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [slRule, setSlRule] = useState("");
   const [tpRule, setTpRule] = useState("");
   const [newRule, setNewRule] = useState("");
   const [rules, setRules] = useState<string[]>(["BOS", "OB", "FVG"]);
+  const [selectedSessions, setSelectedSessions] = useState<string[]>(["LONDON", "NEW_YORK"]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [isClient, setIsClient] = useState(false);
 
   useEffect(() => {
     setIsClient(true);
-    // Parse methodId from URL: /methods/[id]/strategies/new
-    const segments = pathname.split("/");
-    const methodId = segments[segments.indexOf("methods") + 1];
-
-    if (methodId) {
-      const allMethods = DatabaseManager.getMethods();
-      const found = allMethods.find(m => m.id === methodId);
-      if (found) {
-        setMethod(found);
+    async function load() {
+      if (methodId) {
+        try {
+          const data = await getMethodById(methodId);
+          setMethod(data);
+        } catch (err) {
+          console.error("Gagal memuat metode:", err);
+        }
       }
     }
-  }, [pathname]);
+    load();
+  }, [methodId]);
 
   const handleAddRule = (e: React.FormEvent) => {
     e.preventDefault();
@@ -48,7 +51,15 @@ export default function NewStrategyPage() {
     setRules(rules.filter((_, idx) => idx !== index));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSessionToggle = (session: string) => {
+    if (selectedSessions.includes(session)) {
+      setSelectedSessions(selectedSessions.filter(s => s !== session));
+    } else {
+      setSelectedSessions([...selectedSessions, session]);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
 
@@ -60,37 +71,47 @@ export default function NewStrategyPage() {
       setError("Aturan pemicu entri harus diisi");
       return;
     }
+    if (!slRule.trim()) {
+      setError("Aturan stop loss harus diisi");
+      return;
+    }
+    if (!tpRule.trim()) {
+      setError("Aturan take profit harus diisi");
+      return;
+    }
+    if (rules.length === 0) {
+      setError("Pilih minimal 1 konsep konfirmasi");
+      return;
+    }
+    if (selectedSessions.length === 0) {
+      setError("Pilih minimal 1 sesi trading target");
+      return;
+    }
 
     setIsLoading(true);
 
-    const newStrat: Strategy = {
-      id: `s-${Date.now()}`,
-      methodId: method!.id,
-      name,
-      description,
-      rules,
-      winRate: 0,
-      totalTrades: 0,
-      avgR: 0,
-      createdAt: new Date().toISOString()
-    };
-
-    setTimeout(() => {
-      const currentStrats = DatabaseManager.getStrategies();
-      DatabaseManager.saveStrategies([...currentStrats, newStrat]);
-      
-      // Update strategy count in method
-      const allMethods = DatabaseManager.getMethods();
-      const updatedMethods = allMethods.map(m => {
-        if (m.id === method!.id) {
-          return { ...m, strategiesCount: m.strategiesCount + 1 };
-        }
-        return m;
+    try {
+      const res = await createStrategy({
+        methodId: method!.id,
+        name,
+        triggerEntry: description,
+        slRule,
+        tpRule,
+        concepts: rules.map(r => ({ name: r })),
+        sessions: selectedSessions as any,
       });
-      DatabaseManager.saveMethods(updatedMethods);
 
-      router.push(`/methods/${method!.id}`);
-    }, 800);
+      if (res.error) {
+        setError(typeof res.error === "string" ? res.error : "Gagal membuat strategi");
+      } else if (res.data) {
+        router.push(`/methods/${method!.id}`);
+      }
+    } catch (err) {
+      console.error(err);
+      setError("Terjadi kesalahan server. Silakan coba lagi.");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   if (!isClient) {
@@ -196,6 +217,35 @@ export default function NewStrategyPage() {
               rows={3}
               className="w-full bg-zinc-950/50 border border-white/5 rounded-xl px-4 py-3 text-sm focus:border-primary/50 focus:outline-none transition-all placeholder:text-zinc-600 resize-none"
             />
+          </div>
+        </div>
+
+        {/* Sesi Trading Target */}
+        <div className="space-y-4 pt-4 border-t border-zinc-900">
+          <div className="space-y-1">
+            <label className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider">
+              Sesi Trading Target
+            </label>
+            <p className="text-[10px] text-zinc-500">Pilih sesi trading yang relevan dengan strategi ini (bisa multi-select).</p>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {["ASIA", "LONDON", "NEW_YORK", "LONDON_CLOSE"].map((sess) => {
+              const isSelected = selectedSessions.includes(sess);
+              return (
+                <button
+                  key={sess}
+                  type="button"
+                  onClick={() => handleSessionToggle(sess)}
+                  className={`p-3.5 rounded-xl text-xs font-bold border text-center transition-all ${
+                    isSelected 
+                      ? "bg-indigo-600/10 border-indigo-500 text-indigo-400 shadow-md" 
+                      : "bg-zinc-950/40 border-white/5 text-zinc-400 hover:border-zinc-800"
+                  }`}
+                >
+                  {sess.replace("_", " ")}
+                </button>
+              );
+            })}
           </div>
         </div>
 

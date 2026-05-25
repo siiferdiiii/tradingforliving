@@ -1,79 +1,67 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, use } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { 
   ArrowLeft, 
   Trash2, 
   Check, 
   Clock, 
-  Layers, 
   Target, 
   Shield, 
   FileText, 
   BarChart3,
   ListTodo
 } from "lucide-react";
-import { DatabaseManager } from "@/lib/mock-data";
-import { Strategy, Method, Trade } from "@/types";
+import { getStrategyById, deleteStrategy } from "@/lib/actions/strategy";
+import { getMethodById } from "@/lib/actions/method";
 
-export default function StrategyDetailPage() {
-  const pathname = usePathname();
+type DBStrategyWithRelations = Awaited<ReturnType<typeof getStrategyById>>;
+type DBMethod = Awaited<ReturnType<typeof getMethodById>>;
+
+export default function StrategyDetailPage({ params }: { params: Promise<{ id: string, strategyId: string }> }) {
+  const { id: methodId, strategyId } = use(params);
   const router = useRouter();
-  const [method, setMethod] = useState<Method | null>(null);
-  const [strategy, setStrategy] = useState<Strategy | null>(null);
-  const [trades, setTrades] = useState<Trade[]>([]);
+  const [method, setMethod] = useState<DBMethod>(null);
+  const [strategy, setStrategy] = useState<DBStrategyWithRelations>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [isClient, setIsClient] = useState(false);
 
   useEffect(() => {
     setIsClient(true);
-    const segments = pathname.split("/");
-    const stratId = segments[segments.length - 1];
-    const methodId = segments[segments.indexOf("methods") + 1];
+    async function load() {
+      setIsLoading(true);
+      try {
+        if (methodId && strategyId) {
+          const foundMethod = await getMethodById(methodId);
+          setMethod(foundMethod);
 
-    if (methodId && stratId) {
-      const allMethods = DatabaseManager.getMethods();
-      const foundMethod = allMethods.find(m => m.id === methodId);
-      if (foundMethod) {
-        setMethod(foundMethod);
+          const foundStrat = await getStrategyById(strategyId);
+          setStrategy(foundStrat);
+        }
+      } catch (err) {
+        console.error("Gagal memuat strategi:", err);
+      } finally {
+        setIsLoading(false);
       }
-
-      const allStrats = DatabaseManager.getStrategies();
-      const foundStrat = allStrats.find(s => s.id === stratId);
-      if (foundStrat) {
-        setStrategy(foundStrat);
-      }
-
-      // Load trades for this strategy
-      const allTrades = DatabaseManager.getTrades();
-      const assocTrades = allTrades.filter(t => t.strategyId === stratId);
-      setTrades(assocTrades);
     }
-  }, [pathname]);
+    load();
+  }, [methodId, strategyId]);
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!strategy || !method) return;
     if (confirm("Apakah Anda yakin ingin menghapus strategi ini?")) {
-      const allStrats = DatabaseManager.getStrategies();
-      const updated = allStrats.filter(s => s.id !== strategy.id);
-      DatabaseManager.saveStrategies(updated);
-
-      // Decrement count in method
-      const allMethods = DatabaseManager.getMethods();
-      const updatedMethods = allMethods.map(m => {
-        if (m.id === method.id) {
-          return { ...m, strategiesCount: Math.max(0, m.strategiesCount - 1) };
-        }
-        return m;
-      });
-      DatabaseManager.saveMethods(updatedMethods);
-
-      router.push(`/methods/${method.id}`);
+      const res = await deleteStrategy(strategy.id);
+      if (res?.error) {
+        alert(typeof res.error === "string" ? res.error : "Gagal menghapus strategi");
+      } else {
+        router.push(`/methods/${method.id}`);
+      }
     }
   };
 
-  if (!isClient) {
+  if (!isClient || isLoading) {
     return (
       <div className="flex h-[60vh] items-center justify-center">
         <div className="w-8 h-8 border-4 border-primary/30 border-t-primary rounded-full animate-spin" />
@@ -92,11 +80,12 @@ export default function StrategyDetailPage() {
     );
   }
 
-  // Calculate strategy specific performance metrics based on mock trades
+  // Calculate strategy specific performance metrics based on trades
+  const trades = strategy.backtestSessions?.flatMap(s => s.trades) || [];
   const totalStrategyTrades = trades.length;
-  const wins = trades.filter(t => t.result === "win");
+  const wins = trades.filter(t => t.result === "WIN" || t.result === "PARTIAL");
   const winRate = totalStrategyTrades > 0 ? ((wins.length / totalStrategyTrades) * 100).toFixed(1) : "0.0";
-  const avgR = totalStrategyTrades > 0 ? (trades.reduce((sum, t) => sum + t.rr, 0) / totalStrategyTrades).toFixed(2) : "0.00";
+  const avgR = totalStrategyTrades > 0 ? (trades.reduce((sum, t) => sum + Number(t.actualR || 0), 0) / totalStrategyTrades).toFixed(2) : "0.00";
 
   return (
     <div className="space-y-8 animate-fade-up">
@@ -185,7 +174,7 @@ export default function StrategyDetailPage() {
               Aturan Pemicu Setup (Entry Trigger)
             </h3>
             <p className="text-sm text-zinc-300 leading-relaxed whitespace-pre-line bg-zinc-950/40 p-4 rounded-xl border border-white/5">
-              {strategy.description || "Belum ada deskripsi aturan pemicu entri."}
+              {strategy.triggerEntry || "Belum ada deskripsi aturan pemicu entri."}
             </p>
           </div>
 
@@ -197,7 +186,7 @@ export default function StrategyDetailPage() {
                 Manajemen Resiko (SL)
               </h4>
               <p className="text-xs text-zinc-400 leading-relaxed bg-zinc-950/40 p-3.5 rounded-xl border border-white/5 min-h-[80px]">
-                SL ditempatkan secara terukur berdasarkan level teknikal valid (seperti di bawah/di atas swing point pemicu).
+                {strategy.slRule || "Belum ada aturan Stop Loss."}
               </p>
             </div>
 
@@ -207,7 +196,7 @@ export default function StrategyDetailPage() {
                 Target Keuntungan (TP)
               </h4>
               <p className="text-xs text-zinc-400 leading-relaxed bg-zinc-950/40 p-3.5 rounded-xl border border-white/5 min-h-[80px]">
-                Target TP disesuaikan dengan key liquidity pools terdekat untuk memastikan R:R minimum 1:2 terpenuhi.
+                {strategy.tpRule || "Belum ada aturan Take Profit."}
               </p>
             </div>
           </div>
@@ -223,13 +212,13 @@ export default function StrategyDetailPage() {
             <p className="text-xs text-zinc-500">Konsep teknikal wajib terkonfirmasi di chart.</p>
             
             <div className="flex flex-wrap gap-2 pt-2">
-              {strategy.rules && strategy.rules.length > 0 ? (
-                strategy.rules.map((rule, idx) => (
+              {strategy.concepts && strategy.concepts.length > 0 ? (
+                strategy.concepts.map((concept) => (
                   <span 
-                    key={idx} 
+                    key={concept.id} 
                     className="text-xs font-semibold px-3 py-1 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-300 shadow-sm"
                   >
-                    {rule}
+                    {concept.name}
                   </span>
                 ))
               ) : (
@@ -242,14 +231,18 @@ export default function StrategyDetailPage() {
             <h3 className="text-base font-bold text-white">Sesi Trading Relevan</h3>
             <p className="text-xs text-zinc-500">Strategi ini dioptimalkan pada zona volume tinggi.</p>
             <div className="flex flex-wrap gap-2 pt-1.5">
-              {["LONDON", "NEW_YORK"].map((sess) => (
-                <span 
-                  key={sess} 
-                  className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20"
-                >
-                  {sess}
-                </span>
-              ))}
+              {strategy.sessions && strategy.sessions.length > 0 ? (
+                strategy.sessions.map((sess) => (
+                  <span 
+                    key={sess.id} 
+                    className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20"
+                  >
+                    {sess.sessionName.replace("_", " ")}
+                  </span>
+                ))
+              ) : (
+                <span className="text-xs text-zinc-500 italic">Belum ada sesi diatur.</span>
+              )}
             </div>
           </div>
         </div>

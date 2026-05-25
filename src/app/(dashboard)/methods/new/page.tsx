@@ -4,8 +4,7 @@ import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, ArrowRight, Check, Sparkles, Layers, Globe, Lock } from "lucide-react";
-import { DatabaseManager } from "@/lib/mock-data";
-import { Method } from "@/types";
+import { createMethod } from "@/lib/actions/method";
 
 export default function NewMethodPage() {
   const router = useRouter();
@@ -15,6 +14,7 @@ export default function NewMethodPage() {
   const [selectedTfs, setSelectedTfs] = useState<string[]>(["M15", "H1", "H4"]);
   const [isPublic, setIsPublic] = useState(false);
   const [error, setError] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
 
   const timeframes = ["M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1", "MN"];
 
@@ -48,7 +48,7 @@ export default function NewMethodPage() {
     setStep(step - 1);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
 
@@ -61,25 +61,28 @@ export default function NewMethodPage() {
       return;
     }
 
-    const newMethod: Method = {
-      id: `m-${Date.now()}`,
-      name,
-      description,
-      winRate: 0, // new method has no trades initially
-      profitFactor: 0,
-      totalTrades: 0,
-      avgR: 0,
-      isPublic,
-      creatorId: "user-1",
-      creatorName: "Alex Rivera",
-      createdAt: new Date().toISOString(),
-      strategiesCount: 0
-    };
+    setIsLoading(true);
 
-    const currentMethods = DatabaseManager.getMethods();
-    DatabaseManager.saveMethods([...currentMethods, newMethod]);
+    try {
+      const res = await createMethod({
+        name,
+        description: description || undefined,
+        isPublic,
+        timeframes: selectedTfs as any,
+        tags: [],
+      });
 
-    router.push(`/methods/${newMethod.id}`);
+      if (res.error) {
+        setError(typeof res.error === "string" ? res.error : "Gagal membuat metode");
+      } else if (res.data) {
+        router.push(`/methods/${res.data.id}`);
+      }
+    } catch (err) {
+      console.error(err);
+      setError("Terjadi kesalahan server. Silakan coba lagi.");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -312,10 +315,17 @@ export default function NewMethodPage() {
           ) : (
             <button
               onClick={handleSubmit}
-              className="flex items-center gap-1.5 px-6 py-2.5 rounded-xl bg-gradient-to-r from-primary to-accent-violet hover:from-primary-hover hover:to-primary text-white text-xs font-semibold shadow-lg shadow-primary/20 transition-all hover:scale-[1.02]"
+              disabled={isLoading}
+              className="flex items-center gap-1.5 px-6 py-2.5 rounded-xl bg-gradient-to-r from-primary to-accent-violet hover:from-primary-hover hover:to-primary text-white text-xs font-semibold shadow-lg shadow-primary/20 transition-all hover:scale-[1.02] disabled:opacity-50 disabled:pointer-events-none"
             >
-              Konfirmasi & Buat Metode
-              <Check className="w-4 h-4" />
+              {isLoading ? (
+                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              ) : (
+                <>
+                  Konfirmasi & Buat Metode
+                  <Check className="w-4 h-4" />
+                </>
+              )}
             </button>
           )}
         </div>

@@ -1,11 +1,10 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, use } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { 
   ArrowLeft, 
-  Layers, 
   Plus, 
   Calendar, 
   Globe, 
@@ -15,73 +14,67 @@ import {
   Calculator, 
   FileText,
   ChevronRight,
-  Trash2,
-  Settings
+  Trash2
 } from "lucide-react";
-import { DatabaseManager } from "@/lib/mock-data";
-import { Method, Strategy, Trade } from "@/types";
+import { getMethodById, deleteMethod } from "@/lib/actions/method";
+import { deleteStrategy } from "@/lib/actions/strategy";
 
-export default function MethodDetailPage() {
-  const pathname = usePathname();
+type DBMethodWithRelations = Awaited<ReturnType<typeof getMethodById>>;
+
+export default function MethodDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id: methodId } = use(params);
   const router = useRouter();
-  const [method, setMethod] = useState<Method | null>(null);
-  const [strategies, setStrategies] = useState<Strategy[]>([]);
-  const [trades, setTrades] = useState<Trade[]>([]);
+  const [method, setMethod] = useState<DBMethodWithRelations>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [isClient, setIsClient] = useState(false);
 
   useEffect(() => {
     setIsClient(true);
-    // Parse ID from pathname: e.g. /methods/m-1
-    const segments = pathname.split("/");
-    const methodId = segments[segments.length - 1];
-
-    if (methodId) {
-      const allMethods = DatabaseManager.getMethods();
-      const found = allMethods.find(m => m.id === methodId);
-      if (found) {
-        setMethod(found);
-        
-        // Load associated strategies
-        const allStrats = DatabaseManager.getStrategies();
-        const assocStrats = allStrats.filter(s => s.methodId === methodId);
-        setStrategies(assocStrats);
-
-        // Load associated trades
-        const allTrades = DatabaseManager.getTrades();
-        const assocTrades = allTrades.filter(t => t.methodId === methodId);
-        setTrades(assocTrades);
+    async function load() {
+      setIsLoading(true);
+      try {
+        const data = await getMethodById(methodId);
+        setMethod(data);
+      } catch (err) {
+        console.error("Gagal memuat metode:", err);
+      } finally {
+        setIsLoading(false);
       }
     }
-  }, [pathname]);
+    load();
+  }, [methodId]);
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!method) return;
     if (confirm("Apakah Anda yakin ingin menghapus metode teknikal ini? Semua strategi di dalamnya juga akan terhapus.")) {
-      const allMethods = DatabaseManager.getMethods();
-      const updated = allMethods.filter(m => m.id !== method.id);
-      DatabaseManager.saveMethods(updated);
-
-      // Clean up strategies
-      const allStrats = DatabaseManager.getStrategies();
-      const filteredStrats = allStrats.filter(s => s.methodId !== method.id);
-      DatabaseManager.saveStrategies(filteredStrats);
-
-      router.push("/methods");
+      const res = await deleteMethod(method.id);
+      if (res?.error) {
+        alert(typeof res.error === "string" ? res.error : "Gagal menghapus metode");
+      } else {
+        router.push("/methods");
+      }
     }
   };
 
-  const handleStrategyDelete = (stratId: string, e: React.MouseEvent) => {
+  const handleStrategyDelete = async (stratId: string, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     if (confirm("Apakah Anda yakin ingin menghapus strategi ini?")) {
-      const allStrats = DatabaseManager.getStrategies();
-      const updated = allStrats.filter(s => s.id !== stratId);
-      DatabaseManager.saveStrategies(updated);
-      setStrategies(strategies.filter(s => s.id !== stratId));
+      const res = await deleteStrategy(stratId);
+      if (res?.error) {
+        alert(typeof res.error === "string" ? res.error : "Gagal menghapus strategi");
+      } else {
+        try {
+          const data = await getMethodById(methodId);
+          setMethod(data);
+        } catch (err) {
+          console.error("Gagal memuat ulang metode:", err);
+        }
+      }
     }
   };
 
-  if (!isClient) {
+  if (!isClient || isLoading) {
     return (
       <div className="flex h-[60vh] items-center justify-center">
         <div className="w-8 h-8 border-4 border-primary/30 border-t-primary rounded-full animate-spin" />
@@ -101,10 +94,13 @@ export default function MethodDetailPage() {
   }
 
   // Calculate specific method stats based on trades
+  const trades = method.backtestSessions?.flatMap(s => s.trades) || [];
   const totalMethodTrades = trades.length;
-  const wins = trades.filter(t => t.result === "win");
+  const wins = trades.filter(t => t.result === "WIN" || t.result === "PARTIAL");
   const winRate = totalMethodTrades > 0 ? ((wins.length / totalMethodTrades) * 100).toFixed(1) : "0.0";
-  const avgR = totalMethodTrades > 0 ? (trades.reduce((sum, t) => sum + t.rr, 0) / totalMethodTrades).toFixed(2) : "0.00";
+  const avgR = totalMethodTrades > 0 ? (trades.reduce((sum, t) => sum + Number(t.actualR || 0), 0) / totalMethodTrades).toFixed(2) : "0.00";
+
+  const strategies = method.strategies || [];
 
   return (
     <div className="space-y-8 animate-fade-up">
@@ -206,69 +202,76 @@ export default function MethodDetailPage() {
 
         {strategies.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {strategies.map((strat) => (
-              <div 
-                key={strat.id}
-                className="glass rounded-2xl border border-white/5 p-6 flex flex-col justify-between hover:border-zinc-800 transition-all relative overflow-hidden group"
-              >
-                <div className="space-y-4">
-                  <div className="flex items-start justify-between">
-                    <h3 className="text-base font-bold text-white group-hover:text-primary transition-colors">
-                      {strat.name}
-                    </h3>
-                    <button
-                      onClick={(e) => handleStrategyDelete(strat.id, e)}
-                      className="p-1 text-zinc-600 hover:text-red-400 rounded-md hover:bg-red-500/5 transition-colors"
+            {strategies.map((strat) => {
+              const stratTrades = strat.backtestSessions?.flatMap(s => s.trades) || [];
+              const totalStratTrades = stratTrades.length;
+              const stratWins = stratTrades.filter(t => t.result === "WIN" || t.result === "PARTIAL");
+              const stratWinRate = totalStratTrades > 0 ? ((stratWins.length / totalStratTrades) * 100).toFixed(1) : "0.0";
+
+              return (
+                <div 
+                  key={strat.id}
+                  className="glass rounded-2xl border border-white/5 p-6 flex flex-col justify-between hover:border-zinc-800 transition-all relative overflow-hidden group"
+                >
+                  <div className="space-y-4">
+                    <div className="flex items-start justify-between">
+                      <h3 className="text-base font-bold text-white group-hover:text-primary transition-colors">
+                        {strat.name}
+                      </h3>
+                      <button
+                        onClick={(e) => handleStrategyDelete(strat.id, e)}
+                        className="p-1 text-zinc-600 hover:text-red-400 rounded-md hover:bg-red-500/5 transition-colors"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <div className="space-y-2">
+                      <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider flex items-center gap-1">
+                        <FileText className="w-3.5 h-3.5 text-zinc-400" />
+                        Aturan Konfirmasi Entri
+                      </span>
+                      <p className="text-xs text-zinc-400 leading-relaxed line-clamp-3">
+                        {strat.triggerEntry || "Tidak ada deskripsi untuk strategi ini."}
+                      </p>
+                    </div>
+
+                    {/* Rules Preview Tags */}
+                    {strat.concepts && strat.concepts.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pt-2">
+                        {strat.concepts.map((concept) => (
+                          <span 
+                            key={concept.id} 
+                            className="text-[9px] font-semibold px-2 py-0.5 rounded bg-zinc-900 border border-zinc-800/80 text-zinc-400"
+                          >
+                            {concept.name}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between mt-6 pt-4 border-t border-zinc-900/60">
+                    <div className="flex gap-4 text-xs font-mono font-medium text-zinc-500">
+                      <div>
+                        WR: <span className="text-emerald-400">{stratWinRate}%</span>
+                      </div>
+                      <div>
+                        Trades: <span className="text-zinc-300">{totalStratTrades}</span>
+                      </div>
+                    </div>
+                    
+                    <Link
+                      href={`/methods/${method.id}/strategies/${strat.id}`}
+                      className="flex items-center gap-1 text-xs text-primary hover:text-primary-hover font-semibold transition-all group/btn"
                     >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                      Detail Aturan
+                      <ChevronRight className="w-4 h-4 group-hover/btn:translate-x-0.5 transition-transform" />
+                    </Link>
                   </div>
-
-                  <div className="space-y-2">
-                    <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider flex items-center gap-1">
-                      <FileText className="w-3.5 h-3.5 text-zinc-400" />
-                      Aturan Konfirmasi Entri
-                    </span>
-                    <p className="text-xs text-zinc-400 leading-relaxed line-clamp-3">
-                      {strat.description || "Tidak ada deskripsi untuk strategi ini."}
-                    </p>
-                  </div>
-
-                  {/* Rules Preview Tags */}
-                  {strat.rules && strat.rules.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 pt-2">
-                      {strat.rules.map((rule, idx) => (
-                        <span 
-                          key={idx} 
-                          className="text-[9px] font-semibold px-2 py-0.5 rounded bg-zinc-900 border border-zinc-800/80 text-zinc-400"
-                        >
-                          {rule}
-                        </span>
-                      ))}
-                    </div>
-                  )}
                 </div>
-
-                <div className="flex items-center justify-between mt-6 pt-4 border-t border-zinc-900/60">
-                  <div className="flex gap-4 text-xs font-mono font-medium text-zinc-500">
-                    <div>
-                      WR: <span className="text-emerald-400">{strat.winRate}%</span>
-                    </div>
-                    <div>
-                      Trades: <span className="text-zinc-300">{strat.totalTrades}</span>
-                    </div>
-                  </div>
-                  
-                  <Link
-                    href={`/methods/${method.id}/strategies/${strat.id}`}
-                    className="flex items-center gap-1 text-xs text-primary hover:text-primary-hover font-semibold transition-all group/btn"
-                  >
-                    Detail Aturan
-                    <ChevronRight className="w-4 h-4 group-hover/btn:translate-x-0.5 transition-transform" />
-                  </Link>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <div className="glass rounded-2xl border border-white/5 flex flex-col items-center justify-center py-12 text-center">
