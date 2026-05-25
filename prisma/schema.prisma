@@ -1,0 +1,233 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum TradingSession {
+  ASIA
+  LONDON
+  NEW_YORK
+  LONDON_CLOSE
+}
+
+enum TradeResult {
+  WIN
+  LOSS
+  BREAKEVEN
+  PARTIAL
+}
+
+enum TradeMood {
+  DISCIPLINED
+  RUSHED
+  HESITANT
+}
+
+enum ImageType {
+  BEFORE
+  AFTER
+}
+
+// ─── Models ──────────────────────────────────────────────────────────────────
+
+model User {
+  id        String   @id @default(uuid()) @db.Uuid
+  email     String   @unique
+  username  String   @unique @db.VarChar(20)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  profile          Profile?
+  methods          Method[]
+  backtestSessions BacktestSession[]
+
+  @@map("users")
+}
+
+model Profile {
+  id          String  @id @default(uuid()) @db.Uuid
+  userId      String  @unique @map("user_id") @db.Uuid
+  displayName String? @map("display_name") @db.VarChar(50)
+  bio         String? @db.VarChar(300)
+  avatarUrl   String? @map("avatar_url")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("profiles")
+}
+
+model Method {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  name        String   @db.VarChar(100)
+  description String?  @db.VarChar(500)
+  isPublic    Boolean  @default(false) @map("is_public")
+  tags        String[] @default([])
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  timeframes       MethodTimeframe[]
+  strategies       Strategy[]
+  backtestSessions BacktestSession[]
+
+  @@index([userId])
+  @@index([isPublic])
+  @@map("methods")
+}
+
+model MethodTimeframe {
+  id        String @id @default(uuid()) @db.Uuid
+  methodId  String @map("method_id") @db.Uuid
+  timeframe String @db.VarChar(10)
+
+  method Method @relation(fields: [methodId], references: [id], onDelete: Cascade)
+
+  @@unique([methodId, timeframe])
+  @@map("method_timeframes")
+}
+
+model Strategy {
+  id           String   @id @default(uuid()) @db.Uuid
+  methodId     String   @map("method_id") @db.Uuid
+  name         String   @db.VarChar(100)
+  triggerEntry String   @map("trigger_entry") @db.Text
+  slRule       String   @map("sl_rule") @db.VarChar(500)
+  tpRule       String   @map("tp_rule") @db.VarChar(500)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  method           Method             @relation(fields: [methodId], references: [id], onDelete: Cascade)
+  concepts         StrategyConcept[]
+  sessions         StrategySession[]
+  backtestSessions BacktestSession[]
+
+  @@index([methodId])
+  @@map("strategies")
+}
+
+model StrategyConcept {
+  id         String @id @default(uuid()) @db.Uuid
+  strategyId String @map("strategy_id") @db.Uuid
+  name       String @db.VarChar(50)
+
+  strategy      Strategy       @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+  tradeConcepts TradeConcept[]
+
+  @@unique([strategyId, name])
+  @@map("strategy_concepts")
+}
+
+model StrategySession {
+  id          String         @id @default(uuid()) @db.Uuid
+  strategyId  String         @map("strategy_id") @db.Uuid
+  sessionName TradingSession @map("session_name")
+
+  strategy Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+
+  @@unique([strategyId, sessionName])
+  @@map("strategy_sessions")
+}
+
+model BacktestSession {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  methodId    String   @map("method_id") @db.Uuid
+  strategyId  String   @map("strategy_id") @db.Uuid
+  name        String   @db.VarChar(100)
+  instrument  String   @db.VarChar(20)
+  periodStart DateTime @map("period_start") @db.Date
+  periodEnd   DateTime @map("period_end") @db.Date
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  method   Method   @relation(fields: [methodId], references: [id], onDelete: Cascade)
+  strategy Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+  trades   Trade[]
+
+  @@index([userId])
+  @@index([methodId])
+  @@index([strategyId])
+  @@map("backtest_sessions")
+}
+
+model Trade {
+  id               String         @id @default(uuid()) @db.Uuid
+  sessionId        String         @map("session_id") @db.Uuid
+  tradeDate        DateTime       @map("trade_date") @db.Date
+  session          TradingSession
+  entryPrice       Decimal        @map("entry_price") @db.Decimal(20, 5)
+  slPrice          Decimal        @map("sl_price") @db.Decimal(20, 5)
+  tpPrice          Decimal        @map("tp_price") @db.Decimal(20, 5)
+  result           TradeResult
+  timeframeTrigger String         @map("timeframe_trigger") @db.VarChar(10)
+  notes            String?        @db.VarChar(1000)
+  mood             TradeMood?
+  riskPips         Decimal        @map("risk_pips") @db.Decimal(20, 5)
+  rewardPips       Decimal        @map("reward_pips") @db.Decimal(20, 5)
+  rrTarget         Decimal        @map("rr_target") @db.Decimal(10, 2)
+  actualR          Decimal        @map("actual_r") @db.Decimal(10, 2)
+  createdAt        DateTime       @default(now()) @map("created_at")
+
+  backtestSession BacktestSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  closes          TradeClose[]
+  images          TradeImage[]
+  concepts        TradeConcept[]
+
+  @@index([sessionId])
+  @@index([tradeDate])
+  @@map("trades")
+}
+
+model TradeClose {
+  id         String  @id @default(uuid()) @db.Uuid
+  tradeId    String  @map("trade_id") @db.Uuid
+  closePrice Decimal @map("close_price") @db.Decimal(20, 5)
+  percentage Decimal @db.Decimal(5, 2)
+  notes      String? @db.VarChar(500)
+
+  trade Trade @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+
+  @@index([tradeId])
+  @@map("trade_closes")
+}
+
+model TradeImage {
+  id         String    @id @default(uuid()) @db.Uuid
+  tradeId    String    @map("trade_id") @db.Uuid
+  imageType  ImageType @map("image_type")
+  storageUrl String    @map("storage_url")
+  uploadedAt DateTime  @default(now()) @map("uploaded_at")
+
+  trade Trade @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+
+  @@unique([tradeId, imageType])
+  @@index([tradeId])
+  @@map("trade_images")
+}
+
+model TradeConcept {
+  id                String  @id @default(uuid()) @db.Uuid
+  tradeId           String  @map("trade_id") @db.Uuid
+  strategyConceptId String  @map("strategy_concept_id") @db.Uuid
+  isPresent         Boolean @default(false) @map("is_present")
+
+  trade           Trade           @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  strategyConcept StrategyConcept @relation(fields: [strategyConceptId], references: [id], onDelete: Cascade)
+
+  @@unique([tradeId, strategyConceptId])
+  @@index([tradeId])
+  @@index([strategyConceptId])
+  @@map("trade_concepts")
+}
