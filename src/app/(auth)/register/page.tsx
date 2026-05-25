@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Eye, EyeOff, Lock, Mail, User, ArrowRight } from "lucide-react";
 import { motion } from "framer-motion";
+import { register, loginWithGitHub } from "@/lib/actions/auth";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -13,11 +14,11 @@ export default function RegisterPage() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isGithubLoading, setIsGithubLoading] = useState(false);
   const [error, setError] = useState("");
   const [passwordStrength, setPasswordStrength] = useState(0);
 
   useEffect(() => {
-    // Password strength check
     let score = 0;
     if (password.length >= 8) score++;
     if (/[a-zA-Z]/.test(password)) score++;
@@ -29,74 +30,85 @@ export default function RegisterPage() {
   const getStrengthText = () => {
     if (password.length === 0) return "";
     switch (passwordStrength) {
-      case 1:
-        return "Sangat Lemah";
-      case 2:
-        return "Lemah";
-      case 3:
-        return "Sedang";
-      case 4:
-        return "Sangat Kuat";
-      default:
-        return "";
+      case 1: return "Sangat Lemah";
+      case 2: return "Lemah";
+      case 3: return "Sedang";
+      case 4: return "Sangat Kuat";
+      default: return "";
     }
   };
 
   const getStrengthColor = () => {
     switch (passwordStrength) {
-      case 1:
-        return "bg-red-500";
-      case 2:
-        return "bg-amber-500";
-      case 3:
-        return "bg-indigo-500";
-      case 4:
-        return "bg-emerald-500";
-      default:
-        return "bg-zinc-800";
+      case 1: return "bg-red-500";
+      case 2: return "bg-amber-500";
+      case 3: return "bg-indigo-500";
+      case 4: return "bg-emerald-500";
+      default: return "bg-zinc-800";
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setError("");
 
-    setTimeout(() => {
-      // Validate inputs
-      if (username.length < 3) {
-        setError("Username minimal 3 karakter");
-        setIsLoading(false);
-        return;
-      }
-      if (!/^[a-zA-Z0-9_]+$/.test(username)) {
-        setError("Username hanya boleh huruf, angka, dan underscore");
-        setIsLoading(false);
-        return;
-      }
-      if (!email.includes("@")) {
-        setError("Format email tidak valid");
-        setIsLoading(false);
-        return;
-      }
-      if (passwordStrength < 3) {
-        setError("Password harus mengandung huruf dan angka, minimal 8 karakter");
+    // Client-side validations
+    if (username.length < 3) {
+      setError("Username minimal 3 karakter");
+      setIsLoading(false);
+      return;
+    }
+    if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+      setError("Username hanya boleh huruf, angka, dan underscore");
+      setIsLoading(false);
+      return;
+    }
+    if (passwordStrength < 2) {
+      setError("Password terlalu lemah. Gunakan minimal 8 karakter dengan huruf dan angka");
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      const result = await register({ email, password, username });
+
+      if (result.error) {
+        setError(
+          typeof result.error === "string"
+            ? result.error
+            : "Data yang dimasukkan tidak valid"
+        );
         setIsLoading(false);
         return;
       }
 
-      // Successful simulated sign-up
-      localStorage.setItem("tradelog_is_authenticated", "true");
+      // Registrasi berhasil — redirect ke dashboard
       router.push("/dashboard");
-    }, 1200);
+      router.refresh();
+    } catch {
+      setError("Terjadi kesalahan server. Silakan coba lagi.");
+      setIsLoading(false);
+    }
   };
 
-  const handleGithubRegister = () => {
-    setIsLoading(true);
-    setTimeout(() => {
-      localStorage.setItem("tradelog_is_authenticated", "true");
-      router.push("/dashboard");
-    }, 1000);
+  const handleGithubRegister = async () => {
+    setIsGithubLoading(true);
+    setError("");
+    try {
+      const result = await loginWithGitHub();
+      if (result.error) {
+        setError(typeof result.error === "string" ? result.error : "Gagal daftar dengan GitHub");
+        setIsGithubLoading(false);
+        return;
+      }
+      if (result.data?.url) {
+        window.location.href = result.data.url;
+      }
+    } catch {
+      setError("Terjadi kesalahan. Silakan coba lagi.");
+      setIsGithubLoading(false);
+    }
   };
 
   return (
@@ -106,7 +118,6 @@ export default function RegisterPage() {
       transition={{ duration: 0.5 }}
       className="glass rounded-3xl p-8 border border-white/10 shadow-2xl relative overflow-hidden"
     >
-      {/* Decorative gradient corner */}
       <div className="absolute -top-12 -right-12 w-24 h-24 bg-accent-cyan/15 rounded-full blur-2xl" />
 
       <div className="mb-8 text-center">
@@ -185,9 +196,8 @@ export default function RegisterPage() {
             </button>
           </div>
 
-          {/* Password strength bar */}
           {password.length > 0 && (
-            <div className="mt-2.5 space-y-1.5 animate-fade-in">
+            <div className="mt-2.5 space-y-1.5">
               <div className="flex justify-between items-center">
                 <span className="text-[10px] text-zinc-500">Kekuatan Sandi</span>
                 <span className="text-[10px] text-zinc-400 font-semibold">{getStrengthText()}</span>
@@ -233,10 +243,14 @@ export default function RegisterPage() {
 
       <button
         onClick={handleGithubRegister}
-        disabled={isLoading}
+        disabled={isLoading || isGithubLoading}
         className="w-full flex items-center justify-center gap-3 px-5 py-3 rounded-xl bg-white/5 border border-white/10 text-zinc-300 hover:bg-white/10 hover:text-white transition-all disabled:opacity-50"
       >
-        <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
+        {isGithubLoading ? (
+          <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+        ) : (
+          <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
+        )}
         Daftar dengan GitHub
       </button>
 
