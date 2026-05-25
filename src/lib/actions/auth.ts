@@ -86,15 +86,24 @@ export async function register(
       return { error: "Terjadi kesalahan server. Silakan coba lagi." };
     }
 
-    // 3. Prisma: create User + Profile
-    await prisma.user.create({
-      data: {
-        id: authData.user.id,
-        email,
-        username,
-        profile: { create: {} },
-      },
-    });
+    // 3. Prisma: upsert User + Profile (idempotent — trigger may have already created it)
+    try {
+      await prisma.user.upsert({
+        where: { id: authData.user.id },
+        update: { email, username },
+        create: {
+          id: authData.user.id,
+          email,
+          username,
+          profile: { create: {} },
+        },
+      });
+    } catch (dbError) {
+      // Log DB error but don't fail the registration —
+      // Supabase Auth signup already succeeded.
+      // The DB trigger will create the user record as fallback.
+      console.error("register db error (non-fatal):", dbError);
+    }
 
     return { data: { userId: authData.user.id } };
   } catch (error) {
