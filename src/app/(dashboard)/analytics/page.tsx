@@ -19,7 +19,8 @@ import {
   getConceptTimeframeBreakdown,
   getTimeframeBreakdown,
   getSessionBreakdown,
-  getRDistribution
+  getRDistribution,
+  getConceptCombinations
 } from "@/lib/actions/analytics";
 import type { 
   DashboardStats,
@@ -27,8 +28,10 @@ import type {
   ConceptStat,
   ConceptTimeframeStat,
   TimeframeStat,
-  SessionBreakdownStat
+  SessionBreakdownStat,
+  ConceptCombinationStat
 } from "@/lib/actions/analytics";
+
 import { 
   TrendingUp, 
   Target, 
@@ -49,10 +52,11 @@ export default function AnalyticsPage() {
   const [equityData, setEquityData] = useState<EquityPoint[]>([]);
   const [conceptData, setConceptData] = useState<ConceptStat[]>([]);
   const [conceptTimeframeData, setConceptTimeframeData] = useState<ConceptTimeframeStat[]>([]);
+  const [conceptCombinationsData, setConceptCombinationsData] = useState<ConceptCombinationStat[]>([]);
   const [timeframeData, setTimeframeData] = useState<TimeframeStat[]>([]);
   const [sessionData, setSessionData] = useState<SessionBreakdownStat[]>([]);
   const [rDistributionData, setRDistributionData] = useState<{ bucket: string; count: number }[]>([]);
-  const [activeTab, setActiveTab] = useState<"overview" | "konsep" | "timeframe" | "sesi" | "distribusi_r">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "konsep" | "kombinasi" | "timeframe" | "sesi" | "distribusi_r">("overview");
   
   const [isLoading, setIsLoading] = useState(true);
   const [isClient, setIsClient] = useState(false);
@@ -66,6 +70,7 @@ export default function AnalyticsPage() {
           equity,
           concepts,
           conceptTimeframe,
+          conceptCombinations,
           timeframe,
           session,
           rDist
@@ -74,6 +79,7 @@ export default function AnalyticsPage() {
           getEquityCurveData(),
           getConceptBreakdown(),
           getConceptTimeframeBreakdown(),
+          getConceptCombinations(),
           getTimeframeBreakdown(),
           getSessionBreakdown(),
           getRDistribution()
@@ -83,6 +89,7 @@ export default function AnalyticsPage() {
         setEquityData(equity);
         setConceptData(concepts);
         setConceptTimeframeData(conceptTimeframe);
+        setConceptCombinationsData(conceptCombinations);
         setTimeframeData(timeframe);
         setSessionData(session);
 
@@ -172,6 +179,7 @@ export default function AnalyticsPage() {
         {[
           { id: "overview", label: "Overview", icon: BarChart3 },
           { id: "konsep", label: "Metode & Konsep", icon: Compass },
+          { id: "kombinasi", label: "Kombinasi Konsep", icon: Layers },
           { id: "timeframe", label: "Timeframe", icon: Clock },
           { id: "sesi", label: "Sesi Waktu", icon: Calendar },
           { id: "distribusi_r", label: "Distribusi R", icon: Award }
@@ -440,6 +448,146 @@ export default function AnalyticsPage() {
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {activeTab === "kombinasi" && (
+          <div className="space-y-8 animate-fade-in">
+            <div>
+              <h3 className="text-base font-bold text-white">Analisis Kombinasi Konsep</h3>
+              <p className="text-xs text-zinc-500">
+                Melihat probabilitas keberhasilan (win rate) dan kontribusi keuntungan (R) saat dua konsep muncul bersama dalam satu transaksi.
+              </p>
+            </div>
+
+            {conceptCombinationsData.length === 0 ? (
+              <div className="p-8 text-center border border-dashed border-zinc-800 rounded-2xl text-zinc-500 text-xs">
+                Belum memiliki data kombinasi konsep. Tambahkan minimal 1 trade dengan setidaknya 2 konsep yang aktif/tercentang.
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {/* Highlight Best & Worst Synergy */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                  {(() => {
+                    const sortedByWR = [...conceptCombinationsData].sort((a, b) => b.winRate - a.winRate || b.avgR - a.avgR);
+                    const best = sortedByWR[0];
+                    const worst = sortedByWR[sortedByWR.length - 1];
+
+                    return (
+                      <>
+                        {best && (
+                          <div className="glass rounded-2xl border border-emerald-500/10 p-5 bg-emerald-950/5 relative overflow-hidden">
+                            <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/5 rounded-full blur-2xl pointer-events-none" />
+                            <span className="inline-flex items-center gap-1 text-[9px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold uppercase tracking-wider mb-3">
+                              Sinergi Terbaik (Top Synergy)
+                            </span>
+                            <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                              <span>{best.conceptA}</span>
+                              <span className="text-zinc-500">+</span>
+                              <span>{best.conceptB}</span>
+                            </h4>
+                            <div className="grid grid-cols-3 gap-2 mt-4 pt-4 border-t border-white/5">
+                              <div>
+                                <span className="text-[10px] text-zinc-500 block uppercase font-bold">Win Rate</span>
+                                <span className="text-base font-extrabold text-emerald-400">{best.winRate.toFixed(1)}%</span>
+                              </div>
+                              <div>
+                                <span className="text-[10px] text-zinc-500 block uppercase font-bold">Avg R-value</span>
+                                <span className="text-base font-extrabold text-indigo-400">+{best.avgR.toFixed(2)} R</span>
+                              </div>
+                              <div>
+                                <span className="text-[10px] text-zinc-500 block uppercase font-bold">Total Trade</span>
+                                <span className="text-base font-extrabold text-white">{best.totalTrades}</span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {worst && worst !== best && (
+                          <div className="glass rounded-2xl border border-rose-500/10 p-5 bg-rose-950/5 relative overflow-hidden">
+                            <div className="absolute top-0 right-0 w-24 h-24 bg-rose-500/5 rounded-full blur-2xl pointer-events-none" />
+                            <span className="inline-flex items-center gap-1 text-[9px] px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/20 font-bold uppercase tracking-wider mb-3">
+                              Sinergi Lemah / Konflik (Weakest Synergy)
+                            </span>
+                            <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                              <span>{worst.conceptA}</span>
+                              <span className="text-zinc-500">+</span>
+                              <span>{worst.conceptB}</span>
+                            </h4>
+                            <div className="grid grid-cols-3 gap-2 mt-4 pt-4 border-t border-white/5">
+                              <div>
+                                <span className="text-[10px] text-zinc-500 block uppercase font-bold">Win Rate</span>
+                                <span className="text-base font-extrabold text-rose-400">{worst.winRate.toFixed(1)}%</span>
+                              </div>
+                              <div>
+                                <span className="text-[10px] text-zinc-500 block uppercase font-bold">Avg R-value</span>
+                                <span className="text-base font-extrabold text-zinc-400">{worst.avgR.toFixed(2)} R</span>
+                              </div>
+                              <div>
+                                <span className="text-[10px] text-zinc-500 block uppercase font-bold">Total Trade</span>
+                                <span className="text-base font-extrabold text-white">{worst.totalTrades}</span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
+                </div>
+
+                {/* Table of combinations */}
+                <div className="glass rounded-xl border border-white/5 overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="border-b border-zinc-900 text-zinc-400 bg-zinc-950/40">
+                          <th className="px-5 py-3.5 font-bold">Konsep A</th>
+                          <th className="px-5 py-3.5 font-bold">Konsep B</th>
+                          <th className="px-5 py-3.5 font-bold text-center">Total Trade</th>
+                          <th className="px-5 py-3.5 font-bold text-center">Win Rate</th>
+                          <th className="px-5 py-3.5 font-bold text-center">Avg R-value</th>
+                          <th className="px-5 py-3.5 font-bold text-right">Sinergi</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-zinc-900/40">
+                        {conceptCombinationsData
+                          .sort((a, b) => b.winRate - a.winRate || b.totalTrades - a.totalTrades)
+                          .map((row) => {
+                            const isEfficient = row.winRate >= 60 && row.avgR > 1;
+                            const isInefficient = row.winRate < 45;
+                            return (
+                              <tr key={`${row.conceptA}-${row.conceptB}`} className="hover:bg-white/[0.01] transition-all">
+                                <td className="px-5 py-3 font-semibold text-white">{row.conceptA}</td>
+                                <td className="px-5 py-3 font-semibold text-white">{row.conceptB}</td>
+                                <td className="px-5 py-3 text-center font-mono text-zinc-400">{row.totalTrades}</td>
+                                <td className="px-5 py-3 text-center font-mono text-emerald-400 font-bold">{row.winRate.toFixed(1)}%</td>
+                                <td className="px-5 py-3 text-center font-mono text-indigo-400 font-semibold">
+                                  {row.avgR > 0 ? `+${row.avgR.toFixed(2)}` : row.avgR.toFixed(2)} R
+                                </td>
+                                <td className="px-5 py-3 text-right">
+                                  {isEfficient ? (
+                                    <span className="inline-flex items-center gap-1 text-[9px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold uppercase">
+                                      Sinergi Kuat
+                                    </span>
+                                  ) : isInefficient ? (
+                                    <span className="inline-flex items-center gap-1 text-[9px] px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/20 font-bold uppercase">
+                                      Konflik / Lemah
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1 text-[9px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400 font-bold uppercase">
+                                      Moderat
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

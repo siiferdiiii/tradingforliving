@@ -480,3 +480,98 @@ export async function getConceptTimeframeBreakdown(
     };
   });
 }
+
+export type ConceptCombinationStat = {
+  conceptA: string;
+  conceptB: string;
+  totalTrades: number;
+  winCount: number;
+  lossCount: number;
+  winRate: number;
+  avgR: number;
+};
+
+/**
+ * Concept combinations breakdown: analyzes performance of pairs of concepts present on the same trade
+ */
+export async function getConceptCombinations(
+  filters?: AnalyticsFilters
+): Promise<ConceptCombinationStat[]> {
+  const user = await getSession();
+  if (!user) return [];
+
+  const where = buildTradeWhereClause(user.id, filters);
+
+  const trades = await prisma.trade.findMany({
+    where,
+    select: {
+      result: true,
+      actualR: true,
+      concepts: {
+        where: { isPresent: true },
+        select: {
+          strategyConcept: {
+            select: { name: true },
+          },
+        },
+      },
+      adHocConcepts: {
+        where: { isPresent: true },
+        select: {
+          adHocConcept: {
+            select: { name: true },
+          },
+        },
+      },
+    },
+  });
+
+  const combinationsMap = new Map<string, { wins: number; losses: number; total: number; totalR: number }>();
+
+  for (const t of trades) {
+    const conceptNames = [
+      ...t.concepts.map((c) => c.strategyConcept.name),
+      ...t.adHocConcepts.map((c) => c.adHocConcept.name),
+    ];
+
+    // Remove duplicates and sort alphabetically
+    const uniqueNames = Array.from(new Set(conceptNames)).sort();
+
+    if (uniqueNames.length < 2) continue;
+
+    for (let i = 0; i < uniqueNames.length; i++) {
+      for (let j = i + 1; j < uniqueNames.length; j++) {
+        const conceptA = uniqueNames[i];
+        const conceptB = uniqueNames[j];
+        const key = `${conceptA}||${conceptB}`;
+
+        if (!combinationsMap.has(key)) {
+          combinationsMap.set(key, { wins: 0, losses: 0, total: 0, totalR: 0 });
+        }
+
+        const stats = combinationsMap.get(key)!;
+        stats.total++;
+        stats.totalR += Number(t.actualR);
+        if (t.result === "WIN" || t.result === "PARTIAL") {
+          stats.wins++;
+        } else if (t.result === "LOSS") {
+          stats.losses++;
+        }
+      }
+    }
+  }
+
+  return Array.from(combinationsMap.entries()).map(([key, stats]) => {
+    const [conceptA, conceptB] = key.split("||");
+    return {
+      conceptA,
+      conceptB,
+      totalTrades: stats.total,
+      winCount: stats.wins,
+      lossCount: stats.losses,
+      winRate: Math.round((stats.wins / stats.total) * 1000) / 10,
+      avgR: Math.round((stats.totalR / stats.total) * 100) / 100,
+    };
+  });
+}
+

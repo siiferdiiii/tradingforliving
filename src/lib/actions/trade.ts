@@ -14,13 +14,39 @@ type ActionResult<T = void> = {
 };
 
 /**
- * Get all trades for a session (include closes, images, concepts)
+ * Upsert ad-hoc concepts for a user, return their IDs.
+ * Called inside createTrade / updateTrade to keep the global library in sync.
+ */
+async function resolveAdHocConceptIds(
+  userId: string,
+  adHocConcepts: { name: string; isPresent: boolean }[]
+): Promise<{ adHocConceptId: string; isPresent: boolean }[]> {
+  const results: { adHocConceptId: string; isPresent: boolean }[] = [];
+
+  for (const c of adHocConcepts) {
+    const trimmed = c.name.trim();
+    if (!trimmed) continue;
+
+    const concept = await prisma.adHocConcept.upsert({
+      where: { userId_name: { userId, name: trimmed } },
+      create: { userId, name: trimmed },
+      update: {},
+      select: { id: true },
+    });
+
+    results.push({ adHocConceptId: concept.id, isPresent: c.isPresent });
+  }
+
+  return results;
+}
+
+/**
+ * Get all trades for a session (include closes, images, concepts, ad-hoc concepts)
  */
 export async function getTradesBySession(sessionId: string) {
   const user = await getSession();
   if (!user) return [];
 
-  // Verify session ownership
   const session = await prisma.backtestSession.findFirst({
     where: { id: sessionId, userId: user.id },
   });
@@ -33,6 +59,9 @@ export async function getTradesBySession(sessionId: string) {
       images: true,
       concepts: {
         include: { strategyConcept: true },
+      },
+      adHocConcepts: {
+        include: { adHocConcept: true },
       },
     },
     orderBy: { tradeDate: "asc" },
@@ -55,6 +84,7 @@ export async function getTradeById(id: string) {
       closes: true,
       images: true,
       concepts: { include: { strategyConcept: true } },
+      adHocConcepts: { include: { adHocConcept: true } },
       backtestSession: {
         select: { id: true, name: true, instrument: true },
       },
@@ -64,7 +94,7 @@ export async function getTradeById(id: string) {
 
 /**
  * Create a trade with auto-calculated R:R
- * Handles nested closes and concepts in one transaction
+ * Handles nested closes, strategy concepts, and ad-hoc concepts in one transaction
  */
 export async function createTrade(
   input: TradeInput
@@ -93,7 +123,13 @@ export async function createTrade(
       closes: parsed.data.closes,
     });
 
-    // Create trade with nested relations
+    // Resolve ad-hoc concepts (upsert into global library)
+    const resolvedAdHoc = await resolveAdHocConceptIds(
+      user.id,
+      parsed.data.adHocConcepts
+    );
+
+    // Create trade with all nested relations
     const trade = await prisma.trade.create({
       data: {
         sessionId: parsed.data.sessionId,
@@ -123,8 +159,14 @@ export async function createTrade(
             isPresent: c.isPresent,
           })),
         },
+        adHocConcepts: {
+          create: resolvedAdHoc.map((c) => ({
+            adHocConceptId: c.adHocConceptId,
+            isPresent: c.isPresent,
+          })),
+        },
       },
-      include: { closes: true, images: true, concepts: true },
+      include: { closes: true, images: true, concepts: true, adHocConcepts: true },
     });
 
     revalidatePath(`/sessions/${parsed.data.sessionId}`);
@@ -167,9 +209,16 @@ export async function updateTrade(
       closes: parsed.data.closes,
     });
 
-    // Delete old closes/concepts and recreate
+    // Resolve ad-hoc concepts
+    const resolvedAdHoc = await resolveAdHocConceptIds(
+      user.id,
+      parsed.data.adHocConcepts
+    );
+
+    // Delete old relations and recreate
     await prisma.tradeClose.deleteMany({ where: { tradeId: id } });
     await prisma.tradeConcept.deleteMany({ where: { tradeId: id } });
+    await prisma.tradeAdHocConcept.deleteMany({ where: { tradeId: id } });
 
     const trade = await prisma.trade.update({
       where: { id },
@@ -200,8 +249,14 @@ export async function updateTrade(
             isPresent: c.isPresent,
           })),
         },
+        adHocConcepts: {
+          create: resolvedAdHoc.map((c) => ({
+            adHocConceptId: c.adHocConceptId,
+            isPresent: c.isPresent,
+          })),
+        },
       },
-      include: { closes: true, images: true, concepts: true },
+      include: { closes: true, images: true, concepts: true, adHocConcepts: true },
     });
 
     revalidatePath(`/sessions/${existing.sessionId}`);
@@ -215,7 +270,7 @@ export async function updateTrade(
 }
 
 /**
- * Delete a trade (cascade: closes, images, concepts)
+ * Delete a trade (cascade: closes, images, concepts, ad-hoc concepts)
  */
 export async function deleteTrade(id: string): Promise<ActionResult> {
   try {

@@ -50,6 +50,7 @@ model User {
   profile          Profile?
   methods          Method[]
   backtestSessions BacktestSession[]
+  adHocConcepts    AdHocConcept[]
 
   @@map("users")
 }
@@ -180,10 +181,11 @@ model Trade {
   actualR          Decimal        @map("actual_r") @db.Decimal(10, 2)
   createdAt        DateTime       @default(now()) @map("created_at")
 
-  backtestSession BacktestSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  closes          TradeClose[]
-  images          TradeImage[]
-  concepts        TradeConcept[]
+  backtestSession  BacktestSession     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  closes           TradeClose[]
+  images           TradeImage[]
+  concepts         TradeConcept[]
+  adHocConcepts    TradeAdHocConcept[]
 
   @@index([sessionId])
   @@index([tradeDate])
@@ -230,4 +232,37 @@ model TradeConcept {
   @@index([tradeId])
   @@index([strategyConceptId])
   @@map("trade_concepts")
+}
+
+// ─── Ad-hoc (Optional) Concepts ──────────────────────────────────────────────
+
+/// Global library of optional/ad-hoc concepts a user can tag onto any trade,
+/// independent of any defined strategy (e.g. SMT, Liquidity Sweep, etc.)
+model AdHocConcept {
+  id        String @id @default(uuid()) @db.Uuid
+  userId    String @map("user_id") @db.Uuid
+  name      String @db.VarChar(50)
+
+  user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tradeConcepts TradeAdHocConcept[]
+
+  @@unique([userId, name])
+  @@index([userId])
+  @@map("adhoc_concepts")
+}
+
+/// Junction: links a trade to an ad-hoc concept that was present/observed
+model TradeAdHocConcept {
+  id             String  @id @default(uuid()) @db.Uuid
+  tradeId        String  @map("trade_id") @db.Uuid
+  adHocConceptId String  @map("adhoc_concept_id") @db.Uuid
+  isPresent      Boolean @default(true) @map("is_present")
+
+  trade        Trade        @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  adHocConcept AdHocConcept @relation(fields: [adHocConceptId], references: [id], onDelete: Cascade)
+
+  @@unique([tradeId, adHocConceptId])
+  @@index([tradeId])
+  @@index([adHocConceptId])
+  @@map("trade_adhoc_concepts")
 }

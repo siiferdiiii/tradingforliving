@@ -11,6 +11,11 @@ const tradeConceptSchema = z.object({
   isPresent: z.boolean(),
 });
 
+const tradeAdHocConceptSchema = z.object({
+  name: z.string().min(1, "Nama konsep wajib diisi").max(50, "Nama konsep maksimal 50 karakter"),
+  isPresent: z.boolean().default(true),
+});
+
 export const tradeSchema = z
   .object({
     sessionId: z.string().uuid("Session tidak valid"),
@@ -27,6 +32,7 @@ export const tradeSchema = z
     mood: z.enum(["DISCIPLINED", "RUSHED", "HESITANT"]).optional(),
     closes: z.array(tradeCloseSchema).default([]),
     concepts: z.array(tradeConceptSchema).default([]),
+    adHocConcepts: z.array(tradeAdHocConceptSchema).default([]),
   })
   .refine((data) => data.entryPrice !== data.slPrice, {
     message: "Entry price tidak boleh sama dengan SL price",
@@ -49,3 +55,4 @@ export const tradeSchema = z
 export type TradeInput = z.infer<typeof tradeSchema>;
 export type TradeCloseInput = z.infer<typeof tradeCloseSchema>;
 export type TradeConceptInput = z.infer<typeof tradeConceptSchema>;
+export type TradeAdHocConceptInput = z.infer<typeof tradeAdHocConceptSchema>;
