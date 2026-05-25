@@ -4,13 +4,28 @@ import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { User, Layers, Calendar, Globe, Award, Target, Trophy, ChevronRight } from "lucide-react";
-import { MOCK_LEADERBOARD, DatabaseManager } from "@/lib/mock-data";
-import { UserProfile, Method } from "@/types";
+import { getPublicProfileByUsername } from "@/lib/actions/public";
+
+type PublicProfileData = {
+  username: string;
+  displayName: string;
+  bio: string | null;
+  avatarUrl: string | null;
+  publicMethods: any[];
+  stats: {
+    totalTrades: number;
+    winRate: number;
+    avgR: number;
+    consistencyScore: number;
+    totalMethods: number;
+    totalSessions: number;
+  };
+};
 
 export default function PublicProfilePage() {
   const pathname = usePathname();
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [publicMethods, setPublicMethods] = useState<Method[]>([]);
+  const [profile, setProfile] = useState<PublicProfileData | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [isClient, setIsClient] = useState(false);
 
   useEffect(() => {
@@ -20,26 +35,29 @@ export default function PublicProfilePage() {
     const username = segments[segments.length - 1];
 
     if (username) {
-      // Find trader in global leaderboard or user's own profile
-      const userProfile = DatabaseManager.getProfile();
-      if (userProfile.username.toLowerCase() === username.toLowerCase()) {
-        setProfile(userProfile);
-        const assoc = DatabaseManager.getMethods().filter(m => m.isPublic);
-        setPublicMethods(assoc);
-      } else {
-        const found = MOCK_LEADERBOARD.find(u => u.username.toLowerCase() === username.toLowerCase());
-        if (found) {
-          setProfile(found);
-          // Find published methods by this creator
-          const assoc = DatabaseManager.getMethods().filter(m => m.isPublic && m.creatorId === found.id);
-          // Fallback to general public methods if none specific to mock
-          setPublicMethods(assoc.length > 0 ? assoc : DatabaseManager.getMethods().filter(m => m.isPublic));
+      async function loadProfile() {
+        try {
+          const data = await getPublicProfileByUsername(username);
+          setProfile(data as PublicProfileData);
+        } catch (error) {
+          console.error("Failed to load public profile:", error);
+        } finally {
+          setIsLoading(false);
         }
       }
+      loadProfile();
     }
   }, [pathname]);
 
   if (!isClient) {
+    return (
+      <div className="flex h-[60vh] items-center justify-center">
+        <div className="w-8 h-8 border-4 border-primary/30 border-t-primary rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (isLoading) {
     return (
       <div className="flex h-[60vh] items-center justify-center">
         <div className="w-8 h-8 border-4 border-primary/30 border-t-primary rounded-full animate-spin" />
@@ -79,7 +97,7 @@ export default function PublicProfilePage() {
         <div className="space-y-3.5 text-center sm:text-left flex-1">
           <div className="flex flex-wrap justify-center sm:justify-start items-center gap-2.5">
             <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-              TRADER PROFESIONAL
+              TRADER
             </span>
             <span className="text-[10px] text-zinc-500 font-mono flex items-center gap-1">
               <Calendar className="w-3.5 h-3.5" />
@@ -105,8 +123,8 @@ export default function PublicProfilePage() {
             <Trophy className="w-5 h-5" />
           </div>
           <div>
-            <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider block">Peringkat</span>
-            <span className="text-xl font-bold text-white">#{profile.rank || 12}</span>
+            <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider block">Consistency Score</span>
+            <span className="text-xl font-bold text-white">{profile.stats.consistencyScore.toFixed(1)}</span>
           </div>
         </div>
 
@@ -116,7 +134,7 @@ export default function PublicProfilePage() {
           </div>
           <div>
             <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider block">Win Rate</span>
-            <span className="text-xl font-bold text-white">{profile.winRate.toFixed(1)}%</span>
+            <span className="text-xl font-bold text-white">{profile.stats.winRate.toFixed(1)}%</span>
           </div>
         </div>
 
@@ -125,8 +143,8 @@ export default function PublicProfilePage() {
             <Award className="w-5 h-5" />
           </div>
           <div>
-            <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider block">Profit Factor</span>
-            <span className="text-xl font-bold text-white">{profile.profitFactor.toFixed(2)}x</span>
+            <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider block">Avg R</span>
+            <span className="text-xl font-bold text-white">+{profile.stats.avgR.toFixed(2)} R</span>
           </div>
         </div>
       </div>
@@ -138,9 +156,9 @@ export default function PublicProfilePage() {
           <p className="text-xs text-zinc-500">Mempelajari pendekatan teknikal trader ini.</p>
         </div>
 
-        {publicMethods.length > 0 ? (
+        {profile.publicMethods && profile.publicMethods.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {publicMethods.map((m) => (
+            {profile.publicMethods.map((m) => (
               <div 
                 key={m.id}
                 className="glass rounded-2xl border border-white/5 p-6 flex flex-col justify-between hover:border-zinc-800 transition-all relative overflow-hidden group"
@@ -165,11 +183,8 @@ export default function PublicProfilePage() {
 
                 <div className="flex items-center justify-between mt-6 pt-4 border-t border-zinc-900/60">
                   <div className="flex gap-4 text-xs font-mono font-medium text-zinc-500">
-                    <div>
-                      WR: <span className="text-emerald-400">{m.winRate}%</span>
-                    </div>
-                    <div>
-                      Avg R: <span className="text-indigo-400">+{m.avgR} R</span>
+                    <div className="text-[10px]">
+                      Timeframes: <span className="text-zinc-300 font-semibold">{m.timeframes?.map((tf: any) => tf.timeframe).join(", ") || "-"}</span>
                     </div>
                   </div>
                 </div>

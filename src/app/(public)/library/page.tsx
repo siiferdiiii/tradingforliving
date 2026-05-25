@@ -3,24 +3,33 @@
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { Layers, Search, Globe, ChevronRight } from "lucide-react";
-import { DatabaseManager } from "@/lib/mock-data";
-import { Method } from "@/types";
+import { getPublicMethods } from "@/lib/actions/public";
+import type { PublicMethod } from "@/lib/actions/public";
 
 export default function PublicMethodsLibraryPage() {
-  const [methods, setMethods] = useState<Method[]>([]);
+  const [methods, setMethods] = useState<PublicMethod[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
   const [isClient, setIsClient] = useState(false);
 
   useEffect(() => {
     setIsClient(true);
-    // Filter methods where isPublic = true
-    const publicMethods = DatabaseManager.getMethods().filter(m => m.isPublic);
-    setMethods(publicMethods);
+    async function loadMethods() {
+      try {
+        const data = await getPublicMethods();
+        setMethods(data);
+      } catch (error) {
+        console.error("Failed to load public methods:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    loadMethods();
   }, []);
 
   const filteredMethods = methods.filter(m => 
     m.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    m.description.toLowerCase().includes(searchQuery.toLowerCase())
+    (m.description && m.description.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
   if (!isClient) {
@@ -56,7 +65,11 @@ export default function PublicMethodsLibraryPage() {
       </div>
 
       {/* Grid view */}
-      {filteredMethods.length > 0 ? (
+      {isLoading ? (
+        <div className="flex h-[200px] items-center justify-center bg-zinc-950/10">
+          <div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+        </div>
+      ) : filteredMethods.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-4xl mx-auto">
           {filteredMethods.map((m) => (
             <div 
@@ -72,8 +85,8 @@ export default function PublicMethodsLibraryPage() {
                     <Globe className="w-3 h-3" />
                     Publik
                   </span>
-                  <span className="text-[10px] text-zinc-500 font-semibold truncate max-w-[100px]">
-                    Oleh: @{m.creatorName.split(" ")[0].toLowerCase()}
+                  <span className="text-[10px] text-zinc-500 font-semibold truncate max-w-[120px]">
+                    Oleh: @{m.authorUsername}
                   </span>
                 </div>
 
@@ -88,20 +101,20 @@ export default function PublicMethodsLibraryPage() {
                 <div className="grid grid-cols-3 gap-1 text-center">
                   <div className="space-y-0.5">
                     <span className="text-[9px] text-zinc-500 block uppercase font-medium">Win Rate</span>
-                    <span className="text-xs font-bold text-emerald-400 font-mono">{m.winRate}%</span>
+                    <span className="text-xs font-bold text-emerald-400 font-mono">{m.winRate.toFixed(1)}%</span>
                   </div>
                   <div className="space-y-0.5">
-                    <span className="text-[9px] text-zinc-500 block uppercase font-medium">Profit</span>
-                    <span className="text-xs font-bold text-white font-mono">{m.profitFactor}x</span>
+                    <span className="text-[9px] text-zinc-500 block uppercase font-medium">Trades</span>
+                    <span className="text-xs font-bold text-white font-mono">{m.totalTrades}</span>
                   </div>
                   <div className="space-y-0.5">
                     <span className="text-[9px] text-zinc-500 block uppercase font-medium">Avg R</span>
-                    <span className="text-xs font-bold text-indigo-400 font-mono">+{m.avgR}</span>
+                    <span className="text-xs font-bold text-indigo-400 font-mono">+{m.avgR.toFixed(2)} R</span>
                   </div>
                 </div>
 
                 <Link
-                  href={`/u/${m.creatorName.split(" ")[0].toLowerCase()}`}
+                  href={`/u/${m.authorUsername}`}
                   className="w-full flex items-center justify-center gap-1 py-2 text-xs text-primary hover:text-primary-hover font-semibold bg-primary/5 hover:bg-primary/10 border border-primary/10 rounded-xl transition-all group/btn"
                 >
                   Lihat Profil Pembuat
@@ -112,11 +125,12 @@ export default function PublicMethodsLibraryPage() {
           ))}
         </div>
       ) : (
-        <div className="glass rounded-2xl border border-white/5 flex flex-col items-center justify-center py-16 text-center max-w-xl mx-auto">
+        <div className="glass rounded-2xl border border-white/5 flex flex-col items-center justify-center py-16 text-center max-w-xl mx-auto bg-zinc-950/10">
           <Layers className="w-16 h-16 text-zinc-700 mb-4 animate-pulse" />
           <h3 className="text-lg font-bold text-white">Belum ada metode publik</h3>
-          <p className="text-xs text-zinc-500 mt-1 max-w-xs">
-            Saat ini belum ada trader yang membagikan metode teknikal mereka ke Library Global.
+          <p className="text-xs text-zinc-500 mt-1 max-w-xs leading-relaxed">
+            Saat ini belum ada trader yang membagikan metode teknikal mereka ke Library Global. 
+            Mulai buat metode Anda sendiri dan jadikan publik agar dapat dipelajari oleh komunitas!
           </p>
         </div>
       )}

@@ -3,27 +3,28 @@
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { Award, Compass, Info, Shield, Trophy } from "lucide-react";
-import { MOCK_LEADERBOARD } from "@/lib/mock-data";
-import { UserProfile } from "@/types";
+import { getLeaderboard } from "@/lib/actions/public";
+import type { LeaderboardEntry } from "@/lib/actions/public";
 
 export default function LeaderboardPage() {
-  const [traders, setTraders] = useState<UserProfile[]>([]);
+  const [traders, setTraders] = useState<LeaderboardEntry[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [isClient, setIsClient] = useState(false);
 
   useEffect(() => {
     setIsClient(true);
-    setTraders(MOCK_LEADERBOARD);
+    async function loadLeaderboard() {
+      try {
+        const data = await getLeaderboard();
+        setTraders(data);
+      } catch (error) {
+        console.error("Failed to load leaderboard:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    loadLeaderboard();
   }, []);
-
-  // Consistency Score formula: winRate * log10(totalTrades) * avgR
-  const calculateScore = (t: UserProfile) => {
-    // mock total trades if empty
-    const tradesCount = t.totalTrades || 30;
-    const logVal = Math.log10(tradesCount);
-    // mock avgR
-    const avgR = t.profitFactor ? t.profitFactor * 1.2 : 2.5;
-    return parseFloat((t.winRate * logVal * avgR).toFixed(1));
-  };
 
   if (!isClient) {
     return (
@@ -64,80 +65,102 @@ export default function LeaderboardPage() {
 
       {/* Leaderboard Table Container */}
       <div className="glass rounded-2xl border border-white/5 overflow-hidden max-w-4xl mx-auto shadow-2xl">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="border-b border-zinc-900 text-xs font-semibold text-zinc-400 bg-zinc-950/20">
-                <th className="px-6 py-4 text-center w-16">Rank</th>
-                <th className="px-6 py-4">Trader</th>
-                <th className="px-6 py-4">Total Trades</th>
-                <th className="px-6 py-4">Win Rate</th>
-                <th className="px-6 py-4">Profit Factor</th>
-                <th className="px-6 py-4 text-right">Consistency Score</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-900/60">
-              {traders.map((trader, idx) => {
-                const isTop3 = idx < 3;
-                const score = calculateScore(trader);
-                return (
-                  <tr key={trader.id} className="text-sm text-zinc-300 hover:bg-white/[0.01] transition-all">
-                    {/* Rank */}
-                    <td className="px-6 py-4 text-center">
-                      {isTop3 ? (
-                        <div className={`w-7 h-7 rounded-full flex items-center justify-center mx-auto text-xs font-black shadow-lg ${
-                          idx === 0 
-                            ? "bg-amber-500/10 text-amber-400 border border-amber-500/30" 
-                            : idx === 1 
-                            ? "bg-zinc-300/10 text-zinc-300 border border-zinc-300/30" 
-                            : "bg-amber-700/10 text-amber-700 border border-amber-700/30"
-                        }`}>
-                          {idx + 1}
-                        </div>
-                      ) : (
-                        <span className="font-mono text-zinc-500 font-bold">{idx + 1}</span>
-                      )}
-                    </td>
-
-                    {/* Trader user */}
-                    <td className="px-6 py-4">
-                      <Link 
-                        href={`/u/${trader.username}`}
-                        className="flex items-center gap-3 group"
-                      >
-                        {trader.avatarUrl ? (
-                          <img
-                            src={trader.avatarUrl}
-                            alt={trader.displayName}
-                            className="w-9 h-9 rounded-full object-cover border border-zinc-800"
-                          />
-                        ) : (
-                          <div className="w-9 h-9 rounded-full bg-indigo-600/10 text-indigo-400 flex items-center justify-center font-bold">
-                            {trader.displayName.charAt(0)}
+        {isLoading ? (
+          <div className="flex h-[200px] items-center justify-center bg-zinc-950/10">
+            <div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+          </div>
+        ) : traders.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 text-center px-4 bg-zinc-950/10 space-y-4">
+            <Trophy className="w-16 h-16 text-zinc-800 animate-pulse" />
+            <div className="space-y-1">
+              <h3 className="text-zinc-300 font-bold text-base">Belum Ada Data Leaderboard</h3>
+              <p className="text-xs text-zinc-500 max-w-md mx-auto leading-relaxed">
+                Leaderboard saat ini kosong karena belum ada trader yang mencapai batas minimum **30 kali trade** di sesi backtest mereka. 
+                Mulailah melakukan backtest dan log trade Anda untuk menjadi yang pertama muncul di sini!
+              </p>
+            </div>
+            <Link 
+              href="/dashboard"
+              className="text-xs font-semibold px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-colors duration-200 shadow-md"
+            >
+              Mulai Journaling Sekarang
+            </Link>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-zinc-900 text-xs font-semibold text-zinc-400 bg-zinc-950/20">
+                  <th className="px-6 py-4 text-center w-16">Rank</th>
+                  <th className="px-6 py-4">Trader</th>
+                  <th className="px-6 py-4">Total Trades</th>
+                  <th className="px-6 py-4">Win Rate</th>
+                  <th className="px-6 py-4">Avg R</th>
+                  <th className="px-6 py-4 text-right">Consistency Score</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-900/60">
+                {traders.map((trader, idx) => {
+                  const isTop3 = idx < 3;
+                  return (
+                    <tr key={trader.username} className="text-sm text-zinc-300 hover:bg-white/[0.01] transition-all">
+                      {/* Rank */}
+                      <td className="px-6 py-4 text-center">
+                        {isTop3 ? (
+                          <div className={`w-7 h-7 rounded-full flex items-center justify-center mx-auto text-xs font-black shadow-lg ${
+                            idx === 0 
+                              ? "bg-amber-500/10 text-amber-400 border border-amber-500/30" 
+                              : idx === 1 
+                              ? "bg-zinc-300/10 text-zinc-300 border border-zinc-300/30" 
+                              : "bg-amber-700/10 text-amber-700 border border-amber-700/30"
+                          }`}>
+                            {idx + 1}
                           </div>
+                        ) : (
+                          <span className="font-mono text-zinc-500 font-bold">{idx + 1}</span>
                         )}
-                        <div>
-                          <p className="font-bold text-white group-hover:text-primary transition-colors text-xs">{trader.displayName}</p>
-                          <p className="text-[10px] text-zinc-500">@{trader.username}</p>
-                        </div>
-                      </Link>
-                    </td>
+                      </td>
 
-                    {/* Stats */}
-                    <td className="px-6 py-4 font-mono text-xs">{trader.totalTrades}</td>
-                    <td className="px-6 py-4 font-mono text-xs text-emerald-400 font-bold">{trader.winRate.toFixed(1)}%</td>
-                    <td className="px-6 py-4 font-mono text-xs">{trader.profitFactor.toFixed(2)}x</td>
-                    
-                    {/* Score */}
-                    <td className="px-6 py-4 text-right font-extrabold font-mono text-primary text-sm">
-                      {score}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                      {/* Trader user */}
+                      <td className="px-6 py-4">
+                        <Link 
+                          href={`/u/${trader.username}`}
+                          className="flex items-center gap-3 group"
+                        >
+                          {trader.avatarUrl ? (
+                            <img
+                              src={trader.avatarUrl}
+                              alt={trader.displayName}
+                              className="w-9 h-9 rounded-full object-cover border border-zinc-800"
+                            />
+                          ) : (
+                            <div className="w-9 h-9 rounded-full bg-indigo-600/10 text-indigo-400 flex items-center justify-center font-bold text-xs uppercase">
+                              {trader.displayName.charAt(0)}
+                            </div>
+                          )}
+                          <div>
+                            <p className="font-bold text-white group-hover:text-primary transition-colors text-xs">{trader.displayName}</p>
+                            <p className="text-[10px] text-zinc-500">@{trader.username}</p>
+                          </div>
+                        </Link>
+                      </td>
+
+                      {/* Stats */}
+                      <td className="px-6 py-4 font-mono text-xs">{trader.totalTrades}</td>
+                      <td className="px-6 py-4 font-mono text-xs text-emerald-400 font-bold">{trader.winRate.toFixed(1)}%</td>
+                      <td className="px-6 py-4 font-mono text-xs text-indigo-400">{trader.avgR.toFixed(2)} R</td>
+                      
+                      {/* Score */}
+                      <td className="px-6 py-4 text-right font-extrabold font-mono text-primary text-sm">
+                        {trader.consistencyScore.toFixed(1)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );
