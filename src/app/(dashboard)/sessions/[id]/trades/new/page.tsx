@@ -47,6 +47,7 @@ export default function NewTradePage({ params }: { params: Promise<{ id: string 
   const [notes, setNotes] = useState("");
   const [mood, setMood] = useState("DISCIPLINED");
   const [entryImage, setEntryImage] = useState<string>("");
+  const [entryImageFile, setEntryImageFile] = useState<File | null>(null);
 
   // Calculated values
   const [riskPips, setRiskPips] = useState(0);
@@ -140,6 +141,7 @@ export default function NewTradePage({ params }: { params: Promise<{ id: string 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      setEntryImageFile(file);
       const reader = new FileReader();
       reader.onloadend = () => setEntryImage(reader.result as string);
       reader.readAsDataURL(file);
@@ -181,6 +183,25 @@ export default function NewTradePage({ params }: { params: Promise<{ id: string 
       if (result2.error) {
         setError(typeof result2.error === "string" ? result2.error : "Validasi gagal. Periksa input Anda.");
       } else {
+        const newTradeId = result2.data?.id;
+        // Upload screenshot if user selected one
+        if (entryImageFile && newTradeId) {
+          try {
+            const formData = new FormData();
+            formData.append("file", entryImageFile);
+            formData.append("tradeId", newTradeId);
+            formData.append("imageType", "before");
+            const uploadRes = await fetch("/api/upload", {
+              method: "POST",
+              body: formData,
+            });
+            if (!uploadRes.ok) {
+              console.error("Upload gambar gagal:", await uploadRes.text());
+            }
+          } catch (uploadErr) {
+            console.error("Upload gambar error:", uploadErr);
+          }
+        }
         router.push(`/sessions/${sessionId}`);
       }
     } catch {
