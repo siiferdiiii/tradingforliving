@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, use } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -20,9 +20,9 @@ interface AdHocTag {
   isPresent: boolean;
 }
 
-export default function NewTradePage({ params }: { params: { id: string } }) {
+export default function NewTradePage({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
-  const sessionId = params.id;
+  const { id: sessionId } = use(params);
 
   // Session & concepts data
   const [session, setSession] = useState<SessionWithRelations>(null);
