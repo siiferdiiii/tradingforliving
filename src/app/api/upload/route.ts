@@ -72,7 +72,7 @@ export async function POST(request: Request) {
     }
 
     // 5. Upload to Supabase Storage
-    // Path convention: trade-images/{userId}/{tradeId}/{imageType}.{ext}
+    // Path convention: journal-images/{userId}/{tradeId}/{imageType}.{ext}
     const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
     const storagePath = `${user.id}/${tradeId}/${imageType.toLowerCase()}.${ext}`;
 
@@ -80,7 +80,7 @@ export async function POST(request: Request) {
     const buffer = new Uint8Array(arrayBuffer);
 
     const { error: uploadError } = await supabase.storage
-      .from("trade-images")
+      .from("journal-images")
       .upload(storagePath, buffer, {
         contentType: file.type,
         upsert: true,
@@ -96,7 +96,7 @@ export async function POST(request: Request) {
 
     // 6. Generate signed URL (1 year validity)
     const { data: urlData, error: urlError } = await supabase.storage
-      .from("trade-images")
+      .from("journal-images")
       .createSignedUrl(storagePath, 60 * 60 * 24 * 365);
 
     if (urlError || !urlData?.signedUrl) {
