@@ -57,12 +57,17 @@ export async function register(
 
     const { email, password, username } = parsed.data;
 
-    // Check username uniqueness
-    const existingUsername = await prisma.user.findUnique({
-      where: { username },
-    });
-    if (existingUsername) {
-      return { error: "Username sudah digunakan" };
+    // Check username uniqueness (non-blocking if DB is unreachable)
+    try {
+      const existingUsername = await prisma.user.findUnique({
+        where: { username },
+      });
+      if (existingUsername) {
+        return { error: "Username sudah digunakan" };
+      }
+    } catch (dbCheckError) {
+      // DB unreachable — skip check, unique constraint will enforce at DB level
+      console.warn("username check skipped (DB unreachable):", dbCheckError);
     }
 
     // 2. Supabase Auth: signUp
